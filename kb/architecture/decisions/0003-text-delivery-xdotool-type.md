@@ -1,0 +1,45 @@
+---
+id: arch-0003
+type: decision
+summary: Delivery is a pluggable Sink; default `type` via xdotool with a Unicode-safe path, degrading to clipboard; paste and clipboard sinks available.
+domain: architecture
+last-updated: 2026-07-03
+depends-on: [external-xdotool-x11-typing]
+related: [properties-functional, spec-error-taxonomy]
+---
+# ADR 0003 — Text delivery: xdotool `type` default, clipboard fallback
+
+## Context
+"talk-to-type" implies text should appear at the cursor, hands-free, in any focused app.
+Options: (a) **type** — `xdotool type` simulates keystrokes; universal across terminal/
+emacs/GUI but can mangle accents/Unicode under an active QWERTY layout and drop chars if
+too fast; (b) **paste** — set clipboard, send a paste keystroke; robust Unicode but the
+paste shortcut differs per app (terminal `ctrl+shift+v` vs `ctrl+v` vs emacs `C-y`);
+(c) **clipboard only** — revisor-style, user pastes manually; most robust, not hands-free.
+
+The user is bilingual FR/EN — accent fidelity (P3) is non-negotiable.
+
+## Decision
+`Sink` Protocol with three implementations. Default **`type`**, implemented Unicode-safely:
+feed text to `xdotool type --clearmodifiers --delay <key_delay_ms> --file -` (read from
+stdin/file, not argv), which handles arbitrary UTF-8 without shell-quoting hazards. If
+`xdotool` is absent, **degrade to `clipboard`** and notify (P7) — never lose text. `paste`
+and `clipboard` are selectable via `--sink`/config for apps where typing misbehaves.
+
+## Consequences
+- **+** True hands-free dictation everywhere by default.
+- **+** No text ever lost: the degrade path preserves it on the clipboard.
+- **−** `type` remains the accent risk surface → P3 gets a dedicated round-trip regression
+  test that MUST pass in Step 1 before anything else is built on top.
+- **−** A per-key delay is needed to avoid dropped characters; exposed as `key_delay_ms`.
+
+## What this means for implementers
+- Prove P3 first: `TypeSink` round-trips "Café — déçu, ça va ? 🙂" into a scratch xterm and
+  asserts byte-equality. If `xdotool type` can't do accents under the test layout, switch
+  the DEFAULT to `paste` and record it here — do not ship a lossy default.
+- Reset the keyboard layout expectation: `--clearmodifiers` avoids a held mod key
+  corrupting output; verify behaviour with the AZERTY layout active too (user switches).
+
+## Related files
+- `external/xdotool-x11-typing.md` — the exact flags and known Unicode/layout gotchas.
+- `properties/functional.md` — P3 (accents), P7 (degradation).

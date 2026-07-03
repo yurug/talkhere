@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Runtime artifacts (throwable)
+*.wav
+*.log
+talkhere.log
+
+# Local Whisper model caches (large; downloaded on demand)
+models/
+*.bin
+*.ct2/
+
+# Editor backups
+*~
+*.old
