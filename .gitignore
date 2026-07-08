@@ -14,6 +14,10 @@ models/
 *.bin
 *.ct2/
 
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+
 # Editor backups
 *~
 *.old

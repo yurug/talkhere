@@ -1,0 +1,12 @@
+# talkhere runtime dependencies (install into a venv: python3 -m venv .venv).
+#
+# The LOCAL backend (default) needs faster-whisper; the two nvidia-* wheels supply the
+# cuDNN 9 / cuBLAS 12 that CTranslate2 dlopens on the GPU (see
+# kb/external/faster-whisper-blackwell.md — talkhere ctypes-preloads them at runtime).
+# Skip all three if you only ever use the `api` backend (it needs nothing beyond stdlib+curl).
+#
+# Pinned to the versions verified on pangoline (RTX 5060 Ti / Blackwell) 2026-07-08.
+faster-whisper==1.2.1
+ctranslate2==4.8.1
+nvidia-cudnn-cu12==9.24.0.43   # GPU only
+nvidia-cublas-cu12==12.9.2.10  # GPU only — SEPARATE pkg, not bundled by ctranslate2

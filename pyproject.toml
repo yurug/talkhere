@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+# `integration` marks tests needing the GPU/model/network; they self-skip unless
+# TALKHERE_TEST_WAV points at a speech wav. Registering it silences the unknown-mark warning.
+markers = [
+    "integration: needs GPU/model/network; self-skips without TALKHERE_TEST_WAV",
+]
