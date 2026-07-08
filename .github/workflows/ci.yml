@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test deps
+        run: pip install pytest
+      # The unit suite is hermetic: it uses fakes and imports faster-whisper only lazily,
+      # so GPU/model/mic tests self-skip and no heavy wheels are needed in CI.
+      - name: Unit tests
+        run: python -m pytest -q
+      # Structural KB validation (skip git-staleness checks — CI checkouts lack full history).
+      - name: KB lint
+        run: python tools/kb-lint.py kb --strict --no-git

@@ -321,12 +321,17 @@ class ApiBackend:
 
     @staticmethod
     def _key() -> str | None:
-        """OPENAI_API_KEY, else GNOME keyring service=revisor key=api-key (never logged)."""
+        """OpenAI key, never logged. Order: OPENAI_API_KEY env, else a GNOME keyring entry
+        whose service/key default to talkhere/api-key and are overridable via
+        TALKHERE_KEYRING_SERVICE / TALKHERE_KEYRING_KEY (e.g. point the service at another
+        tool to reuse a key you already stored). Returns None if unavailable."""
         if os.environ.get("OPENAI_API_KEY"):
             return os.environ["OPENAI_API_KEY"]
+        service = os.environ.get("TALKHERE_KEYRING_SERVICE", "talkhere")
+        attr = os.environ.get("TALKHERE_KEYRING_KEY", "api-key")
         try:
-            r = subprocess.run(["secret-tool", "lookup", "service", "revisor", "key",
-                                "api-key"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run(["secret-tool", "lookup", "service", service, "key", attr],
+                               capture_output=True, text=True, timeout=5)
             return r.stdout.strip() or None if r.returncode == 0 else None
         except Exception:
             return None

@@ -1,0 +1,14 @@
+# Optional talkhere mic indicator for i3blocks.
+#
+# 1. Point `command` at this repo's i3blocks/talkhere script (or symlink it into your
+#    i3blocks scripts dir).
+# 2. `signal=N` must match the RTMIN+N your i3 bindings poke, e.g. with
+#    `bindsym $mod+t exec --no-startup-id "talkhere; pkill -RTMIN+4 i3blocks"` use signal=4.
+# 3. `interval=once` = no polling; the block only refreshes when signalled.
+#
+# Add this block to ~/.config/i3blocks/config:
+
+[talkhere]
+command=/path/to/talkhere/i3blocks/talkhere
+interval=once
+signal=4

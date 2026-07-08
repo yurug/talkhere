@@ -31,9 +31,12 @@ stdin) form is what talkhere ships — it keeps the secret out of the process ar
   the plain transcript (no JSON parsing needed for the simple path).
 - `prompt` (optional form field): the `~/.talkhere.prompt` vocabulary bias (T9).
 
-## Key sourcing (reuse revisor's, never hard-code)
-Order: `OPENAI_API_KEY` env → keyring `secret-tool lookup service revisor key api-key`.
-Same key revisor uses (present on pangoline, verified 2026-07-03). No key → E7 (exit 1).
+## Key sourcing (configurable, never hard-code)
+Order: `OPENAI_API_KEY` env → GNOME keyring `secret-tool lookup service <S> key <K>`, where
+`S`/`K` default to `talkhere`/`api-key` and are overridable via `TALKHERE_KEYRING_SERVICE` /
+`TALKHERE_KEYRING_KEY`. (The author reuses their `revisor` keyring key by exporting
+`TALKHERE_KEYRING_SERVICE=revisor`.) No key → E7 (exit 1). Key never logged; passed to curl
+via stdin, not argv.
 
 ## Runtime behaviour / budget
 - One HTTP request per utterance. Cost is per-audio-minute; short dictations are cheap but

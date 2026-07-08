@@ -1,0 +1,12 @@
+#!/bin/bash
+# i3blocks block for talkhere — shows a mic indicator while a dictation is recording.
+# State is just the presence of talkhere's runtime file (no polling, no process spawn), so
+# the bar stays cheap. Refresh it by signal: the i3 bindings send `pkill -RTMIN+N i3blocks`,
+# and the [talkhere] block declares the matching `signal=N` (see config.example).
+STATE="${XDG_RUNTIME_DIR:-/tmp}/talkhere/recording.json"
+if [ -f "$STATE" ]; then
+    echo "🎙 REC"     # full_text
+    echo "🎙"         # short_text
+    echo "#bf616a"    # colour: red while recording
+fi
+# idle → no output → block hidden

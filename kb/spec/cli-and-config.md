@@ -3,7 +3,7 @@ id: spec-cli-and-config
 type: spec
 summary: The full CLI contract (flags, exit codes) and the config/env/file surface for talkhere.
 domain: interface
-last-updated: 2026-07-03
+last-updated: 2026-07-08
 depends-on: [prd, spec-algorithms]
 related: [spec-error-taxonomy]
 ---
@@ -49,7 +49,9 @@ related: [spec-error-taxonomy]
 | `TALKHERE_COMPUTE` | `float16` | CTranslate2 compute_type — **do not set int8 on Blackwell** |
 | `TALKHERE_DEVICE` | `cuda` | `cuda` / `cpu` (auto-falls back to cpu if cuda init fails) |
 | `TALKHERE_API_MODEL` | `whisper-1` | OpenAI transcription model for the api backend |
-| `OPENAI_API_KEY` | — | api backend key; else keyring `service=revisor key=api-key` |
+| `OPENAI_API_KEY` | — | api backend key; else the keyring lookup below |
+| `TALKHERE_KEYRING_SERVICE` | `talkhere` | GNOME keyring `service` for the api key |
+| `TALKHERE_KEYRING_KEY` | `api-key` | GNOME keyring `key` attribute for the api key |
 | `TALKHERE_TRAILING_SPACE` | `1` | append one space after injected text |
 | `TALKHERE_KEEP_WAV` | `0` | keep the utterance wav for debugging |
 

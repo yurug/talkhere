@@ -24,14 +24,24 @@ machine-checked by `tools/kb-lint.py` + `.githooks/pre-commit`.
 `$mod+t` to dictate anywhere; `$mod+Shift+t` cancels. `talkhere --once N` / `--backend api`
 / `--sink clipboard` / `--lang fr` for scripting. Log: `~/.talkhere.log`.
 
+## Publishable (done 2026-07-08)
+LICENSE (MIT); rewritten general README (full manual); `i3blocks/` (block script +
+config.example); `.github/workflows/ci.yml` (hermetic pytest + kb-lint --no-git, verified
+green in a clean venv). Personal dependency removed — api key sourcing is configurable
+(`TALKHERE_KEYRING_SERVICE`/`_KEY`, default talkhere/api-key) instead of hard-coded revisor.
+
 ## Open (non-blocking)
-- **dotfiles repo (`~/perso/dev/dotfiles`) — NOT committed** (holds user WIP). My edits:
-  i3/config, i3blocks/config, i3blocks/scripts/talkhere (new), + xdotool/talkhere lines in
-  bootstrap.sh & machines/pangoline/MACHINE.md. User to review + commit.
-- **SessionStart hook** uninstalled (blocked as self-mod); snippet in ADK templates.
-- **Q8:** talkhere is in `work/dev/` — work vs perso, and publish to GitHub? Undecided.
+- **dotfiles: talkhere parts COMMITTED** (`dedea94` in `~/perso/dev/dotfiles`: i3/config,
+  i3blocks/config, i3blocks/scripts/talkhere, xdotool in bootstrap.sh). Your other WIP
+  (Android/emacs/git/backup/shell + the MACHINE.md talkhere row, which shares a hunk with
+  your Android edits) left untouched for you.
+- **yann's API fallback:** keyring service default is now `talkhere`. Local GPU is the
+  default so this rarely matters; to reuse your revisor key: `export
+  TALKHERE_KEYRING_SERVICE=revisor` (or store a `talkhere` keyring entry).
+- **SessionStart hook** uninstalled (blocked as self-mod).
+- **Q8:** publish under `yurug/talkhere` (sibling of yurug/revisor)? work vs perso? Undecided.
 - Optional `--serve` warm helper (~1.3 s latency); pangolin (laptop) portability check.
 
 ## Next if resumed
-Nothing required — the tool is complete and working. Optional: `--serve`, publish (Q8),
-laptop check. Try it by voice (the one thing untested — no mic input available to the agent).
+Nothing required — complete, working, and publishable. Optional: publish (Q8), `--serve`,
+laptop check.
