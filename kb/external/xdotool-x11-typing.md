@@ -3,12 +3,17 @@ id: external-xdotool-x11-typing
 type: external
 summary: How to inject Unicode text with xdotool on X11 without mangling accents or dropping characters; the flags and layout gotchas.
 domain: external-dependency
-last-updated: 2026-07-03
+last-updated: 2026-07-08
 related: [arch-0003, properties-functional]
 ---
 # xdotool text injection on X11
 
-**Status: researched + from revisor experience; accent behaviour to verify in Step 1.**
+**Status: VERIFIED on pangoline 2026-07-08 (xdotool 3.20, us/QWERTY).**
+`xdotool type --clearmodifiers --delay 12 --file -` reading UTF-8 from stdin injected
+"Café — déçu, ça va ? 🙂" **byte-exact** — accents, em-dash, and even the non-BMP emoji all
+survived. So the accent risk (P3) is closed for the default `type` sink; reproduce with
+`tools/p3_livetest.sh`. (AZERTY not force-tested to avoid clobbering the live dual-layout
+config; xdotool remaps keysyms independent of the base layout, which is why it worked here.)
 
 `xdotool` works only on X11 (our case: i3 on X11). It injects via XTEST. Two relevant verbs:
 - `xdotool type <string>` — types characters (what we want for `TypeSink`).

@@ -46,12 +46,13 @@ Build the minimum runnable `talkhere --once <secs>`: record a fixed clip → `Lo
   model-load decision made. **Biggest unknown:** "does float16 large-v3-turbo load+run fast
   enough on sm_120?" — proven here or the plan pivots to api-default.
 - Properties: P2, P3, P4, P5 (empty guard), P6; NF1, NF4.
-- **Status 2026-07-08 — mostly DONE.** `talkhere.py` implements `--once`, the Local/Api
-  backends, all three sinks, feedback, logging, config; 13 unit tests + a GPU integration
-  test pass. Verified live: record→GPU-transcribe→clipboard delivers the exact transcript;
-  P5 empty-guard fires on silence. **Pending (needs `xdotool`, user sudo):** the live P3
-  accent round-trip through the `type` sink into a scratch xterm under QWERTY/AZERTY. The
-  `--file -` stdin mechanism P3 relies on is already unit-tested.
+- **Status 2026-07-08 — DONE.** `talkhere.py` implements `--once`, the Local/Api backends,
+  all three sinks, feedback, logging, config; 13 unit tests + a GPU integration test pass.
+  Verified live: record→GPU-transcribe→clipboard delivers the exact transcript; P5
+  empty-guard fires on silence. **P3 VERIFIED live** (`tools/p3_livetest.sh`): `type` sink
+  injected "Café — déçu, ça va ? 🙂" byte-exact (accents + em-dash + emoji) under us/QWERTY
+  → the `type` default stands (no pivot to `paste`). AZERTY not force-switched to avoid
+  clobbering the dual-layout config; xdotool remapping is layout-independent.
 
 ## Step 2 — The toggle UX (state machine, recorder, cues)
 Turn the `--once` slice into the real product:
