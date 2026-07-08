@@ -184,6 +184,73 @@ def test_P11_bad_config_yields_defaults(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Toggle state machine (P1 toggle, P8 single-recorder, E9 stale recovery)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def runtime(tmp_path, monkeypatch):
+    """Redirect the runtime dir / state / lock files into a temp dir for hermetic tests."""
+    monkeypatch.setattr(talkhere, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(talkhere, "STATE_FILE", tmp_path / "recording.json")
+    monkeypatch.setattr(talkhere, "LOCK_FILE", tmp_path / "talkhere.lock")
+    return tmp_path
+
+
+def _stub_recorder(monkeypatch, alive=True):
+    """Replace the real recorder/pid/stop/transcribe with observable stubs. Returns
+    (start_calls, stops, delivered)."""
+    start_calls, stops, delivered = [], [], []
+
+    class FakeProc:
+        pid = 4242
+
+    def fake_start(wav):
+        start_calls.append(str(wav))
+        return FakeProc()
+
+    monkeypatch.setattr(talkhere, "_recorder_cmd", lambda w: ["true"])
+    monkeypatch.setattr(talkhere, "start_recorder", fake_start)
+    monkeypatch.setattr(talkhere, "_pid_alive", lambda pid: alive)
+    monkeypatch.setattr(talkhere, "stop_recorder_pid", lambda pid: stops.append(pid))
+    monkeypatch.setattr(talkhere, "transcribe_and_deliver",
+                        lambda wav, cfg, args, verbose, lang=None:
+                        delivered.append((str(wav), lang)) or 0)
+    return start_calls, stops, delivered
+
+
+def test_P1_toggle_starts_then_stops(runtime, monkeypatch):
+    start_calls, stops, delivered = _stub_recorder(monkeypatch)
+    assert talkhere.cmd_toggle({}, ns(), verbose=False) == 0     # START
+    st = talkhere.read_state()
+    assert st is not None and st["pid"] == 4242                  # recording
+    assert talkhere.cmd_toggle({}, ns(), verbose=False) == 0     # STOP
+    assert talkhere.read_state() is None                        # idle again (P1)
+    assert stops == [4242] and delivered                        # recorder stopped, wav delivered
+    assert delivered[0][1] == "auto"                            # lang threaded from state (P4)
+
+
+def test_P8_second_toggle_does_not_start_a_second_recorder(runtime, monkeypatch):
+    start_calls, stops, delivered = _stub_recorder(monkeypatch)
+    talkhere.cmd_toggle({}, ns(), verbose=False)                 # START
+    talkhere.cmd_toggle({}, ns(), verbose=False)                 # STOP, must NOT start again
+    assert len(start_calls) == 1                                 # exactly one recorder (P8)
+
+
+def test_E9_stale_state_self_heals(runtime, monkeypatch):
+    monkeypatch.setattr(talkhere, "_pid_alive", lambda pid: False)   # recorder pid is dead
+    talkhere.write_state({"pid": 999999, "wav": "/x", "started": 0, "lang": "auto"})
+    assert talkhere.read_state() is None                        # reported idle
+    assert not talkhere.STATE_FILE.exists()                     # and the stale file is cleaned
+
+
+def test_cancel_stops_recorder_and_injects_nothing(runtime, monkeypatch):
+    start_calls, stops, delivered = _stub_recorder(monkeypatch)
+    talkhere.cmd_toggle({}, ns(), verbose=False)                 # START
+    assert talkhere.cmd_cancel() == 0
+    assert talkhere.read_state() is None                        # idle
+    assert stops == [4242] and delivered == []                  # stopped, nothing delivered (P5)
+
+
+# ---------------------------------------------------------------------------
 # Integration (GPU) — self-skips when faster-whisper / cuda absent
 # ---------------------------------------------------------------------------
 @pytest.mark.integration

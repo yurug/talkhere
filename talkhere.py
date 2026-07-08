@@ -25,7 +25,10 @@ Design decisions (see kb/architecture/):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
+import fcntl
+import json
 import os
 import shutil
 import signal
@@ -43,6 +46,8 @@ LOG_FILE = Path.home() / ".talkhere.log"
 PROMPT_FILE = Path.home() / ".talkhere.prompt"        # Whisper initial_prompt (T9)
 CONFIG_FILE = Path.home() / ".config" / "talkhere" / "config.toml"
 RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "talkhere"
+STATE_FILE = RUNTIME_DIR / "recording.json"   # presence == recording (kb/spec/algorithms.md)
+LOCK_FILE = RUNTIME_DIR / "talkhere.lock"     # flock serialises the toggle decision (P8)
 
 MIN_MS = 300                    # utterances shorter than this are "nothing captured" (P5/T1)
 SAMPLE_RATE = 16000             # Whisper wants 16 kHz mono
@@ -180,6 +185,30 @@ def stop_recorder(proc: subprocess.Popen) -> None:
         proc.wait(timeout=1.0)
     except subprocess.TimeoutExpired:
         proc.kill()
+
+
+def _pid_alive(pid: int) -> bool:
+    """True if a process with this pid currently exists (via /proc)."""
+    return Path(f"/proc/{pid}").exists()
+
+
+def stop_recorder_pid(pid: int) -> None:
+    """Stop a recorder we did NOT spawn as our child (the toggle START process has exited;
+    a later STOP process only has the pid). Same SIGINT-first clean-stop as stop_recorder,
+    but polls /proc since we cannot waitpid() on a non-child (T3/E11)."""
+    def gone() -> bool:
+        return not _pid_alive(pid)
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
+        if gone():
+            return
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            return
+        for _ in range(20):                        # up to ~1 s for a clean WAV finalise
+            if gone():
+                return
+            time.sleep(0.05)
 
 
 def wav_duration_ms(wav: Path) -> int:
@@ -429,9 +458,11 @@ def postprocess(text: str, trailing_space: bool) -> str:
     return text
 
 
-def transcribe_and_deliver(wav: Path, cfg: dict, args, verbose: bool) -> int:
+def transcribe_and_deliver(wav: Path, cfg: dict, args, verbose: bool,
+                           lang: str | None = None) -> int:
     """Shared STOP-path tail: guard empties, transcribe via the ladder, deliver via the sink.
-    Returns a process exit code. Used by --once now and the toggle STOP path (Step 2)."""
+    Returns a process exit code. Used by --once and the toggle STOP path. `lang` overrides the
+    resolved language (the toggle stores the language chosen at START time)."""
     dur = wav_duration_ms(wav)
     if dur < MIN_MS:                                   # P5/T1: too short => nothing captured
         log(f"nothing captured (dur={dur}ms < {MIN_MS}ms)")
@@ -444,7 +475,8 @@ def transcribe_and_deliver(wav: Path, cfg: dict, args, verbose: bool) -> int:
         notify("talkhere: no STT backend", "install faster-whisper or set an OpenAI key")
         return 1
 
-    lang = resolve(args, cfg, "lang", "TALKHERE_LANG", "auto")
+    if lang is None:
+        lang = resolve(args, cfg, "lang", "TALKHERE_LANG", "auto")
     cue("stop")
     notify("talkhere", "transcribing…")
     text = backend.transcribe(str(wav), lang)
@@ -503,6 +535,108 @@ def cmd_once(seconds: float, cfg: dict, args, verbose: bool) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Toggle state machine (kb/spec/algorithms.md, kb/architecture/decisions/0002)
+# ---------------------------------------------------------------------------
+@contextlib.contextmanager
+def _lock():
+    """Serialise the read-decide-write of the state file so two near-simultaneous hotkey
+    presses can't both START a recorder (P8). Held only around the decision, never during
+    transcription — so a press mid-transcribe starts the next utterance rather than blocking."""
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    f = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(f, fcntl.LOCK_UN)
+        f.close()
+
+
+def read_state() -> dict | None:
+    """Return the recording state, or None if idle. Self-heals a STALE state file whose
+    recorder pid is dead (crash/reboot) by clearing it and reporting idle (E9/T4)."""
+    if not STATE_FILE.exists():
+        return None
+    try:
+        st = json.loads(STATE_FILE.read_text())
+    except Exception:                                  # corrupt state => treat as idle
+        clear_state()
+        return None
+    pid = st.get("pid")
+    if not pid or not _pid_alive(int(pid)):
+        log("state: recovered stale recording.json (recorder pid dead) (E9)")
+        clear_state()
+        return None
+    return st
+
+
+def write_state(st: dict) -> None:
+    STATE_FILE.write_text(json.dumps(st))
+
+
+def clear_state() -> None:
+    STATE_FILE.unlink(missing_ok=True)
+
+
+def _start(cfg: dict, args) -> int:
+    """START branch: spawn a detached recorder, record the pid+wav in the state file, cue,
+    and return so this process can exit while recording continues. Assumes the lock is held."""
+    if _recorder_cmd(Path("/x")) is None:              # P9/E2 hard precondition
+        notify("talkhere: no recorder", "install pw-record or arecord")
+        return 1
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    wav = RUNTIME_DIR / f"utterance-{int(time.time())}.wav"
+    proc = start_recorder(wav)
+    if proc is None:
+        notify("talkhere: no recorder", "install pw-record or arecord")
+        return 1
+    lang = resolve(args, cfg, "lang", "TALKHERE_LANG", "auto")
+    write_state({"pid": proc.pid, "wav": str(wav), "started": time.time(), "lang": lang})
+    log(f"START recorder pid={proc.pid} wav={wav} lang={lang}")
+    cue("start")
+    notify("talkhere", "● recording — press again to stop")
+    return 0
+
+
+def _stop(st: dict, cfg: dict, args, verbose: bool) -> int:
+    """STOP branch: stop the recorder cleanly, then transcribe+deliver its wav. Assumes the
+    state has already been cleared under the lock, so a new press can START concurrently."""
+    wav = Path(st["wav"])
+    stop_recorder_pid(int(st["pid"]))
+    log(f"STOP recorder pid={st['pid']} wav={wav}")
+    rc = transcribe_and_deliver(wav, cfg, args, verbose, lang=st.get("lang"))
+    if os.environ.get("TALKHERE_KEEP_WAV", "0") == "0":
+        wav.unlink(missing_ok=True)
+    return rc
+
+
+def cmd_toggle(cfg: dict, args, verbose: bool) -> int:
+    """No-arg invocation: START if idle, else STOP. The decision is made under the lock;
+    transcription (slow) happens after the lock is released."""
+    with _lock():
+        st = read_state()
+        if st is None:
+            return _start(cfg, args)
+        clear_state()                                  # we own this utterance now
+    return _stop(st, cfg, args, verbose)
+
+
+def cmd_cancel() -> int:
+    """Abort an in-progress recording: kill the recorder, drop the wav, inject nothing."""
+    with _lock():
+        st = read_state()
+        if st is None:
+            notify("talkhere", "nothing to cancel")
+            return 0
+        clear_state()
+    stop_recorder_pid(int(st["pid"]))
+    Path(st["wav"]).unlink(missing_ok=True)
+    log("CANCEL: recording discarded")
+    notify("talkhere", "recording cancelled")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
@@ -510,6 +644,10 @@ def build_parser() -> argparse.ArgumentParser:
         prog="talkhere", description="Talk-to-type: speak, and the text is typed at the cursor.")
     p.add_argument("--once", type=float, metavar="SECS",
                    help="record SECS seconds then transcribe+inject (no toggle; scripting/test)")
+    p.add_argument("--stop", action="store_true",
+                   help="force stop+transcribe an in-progress recording")
+    p.add_argument("--cancel", action="store_true",
+                   help="abort an in-progress recording; inject nothing")
     p.add_argument("--status", action="store_true",
                    help="print idle|recording; exit 0 if idle else 1 (for i3blocks)")
     p.add_argument("--lang", choices=["auto", "fr", "en"], help="force language for this run (P4)")
@@ -524,19 +662,27 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config()
 
     if args.status:
-        # Step 2 adds the real state file; for now talkhere is always idle (no daemon).
-        recording = (RUNTIME_DIR / "recording.json").exists()
+        # read_state() self-heals a stale lock; kept fast and GPU-free for i3blocks polling.
+        recording = read_state() is not None
         print("recording" if recording else "idle")
         return 1 if recording else 0
+
+    if args.cancel:
+        return cmd_cancel()
 
     if args.once is not None:
         return cmd_once(args.once, cfg, args, args.verbose)
 
-    # No-arg toggle is Step 2. Until then, guide the user to the working slice.
-    notify("talkhere", "toggle not wired yet — try: talkhere --once 4")
-    print("talkhere: toggle mode arrives in Step 2. For now: talkhere --once <seconds>",
-          file=sys.stderr)
-    return 2
+    if args.stop:                                      # force STOP (a distinct binding, if wanted)
+        with _lock():
+            st = read_state()
+            if st is None:
+                notify("talkhere", "not recording")
+                return 0
+            clear_state()
+        return _stop(st, cfg, args, args.verbose)
+
+    return cmd_toggle(cfg, args, args.verbose)         # no args => toggle
 
 
 if __name__ == "__main__":
