@@ -3,7 +3,7 @@ id: plan
 type: spec
 summary: Incremental implementation plan — riskiest path first (local Whisper on Blackwell + accent injection), then the toggle UX, then resilience/polish.
 domain: planning
-last-updated: 2026-07-03
+last-updated: 2026-07-08
 depends-on: [prd, spec-algorithms, properties-functional, external-faster-whisper-blackwell]
 ---
 # Implementation plan
@@ -13,24 +13,24 @@ Ordered by **risk**, not ease. The whole project's uncertainty lives in two plac
 inject faithfully — so Step 1 is a running slice straight through both. Steps 2–3 add the
 real UX and resilience only after Step 1 proves the tool is viable.
 
-## ⚠ The one open architectural tension (decide in Step 1)
-talkhere is a short-lived process per utterance (revisor-style, zero idle footprint / NF2),
-but loading a Whisper *large* model takes **seconds**, which would dominate stop→text
-latency (NF1 ≤ 2 s). These pull against each other. Step 1 MEASURES it and picks:
-- **(a)** per-invocation load with a fast model (`large-v3-turbo`/`small`) — simplest, may be enough;
-- **(b)** an optional warm-model helper (tiny persistent transcriber the STOP path talks to)
-  — hits latency but reintroduces a resident process (softens ADR 0002's "no daemon");
-- **(c)** default to the `api` backend for latency, local for privacy — user picks per use.
-This choice is a Step-1 acceptance criterion, surfaced to the user before Step 2.
+## ✅ The one architectural tension (RESOLVED 2026-07-08 with measurement)
+talkhere is short-lived per utterance (zero idle footprint / NF2) vs. Whisper model load
+taking seconds (NF1 ≤ 2 s). **Measured:** load ~2.2 s + transcribe ~1.3 s (5 s clip).
+**Decision:** v1 uses **(a) per-invocation load** (`large-v3-turbo`, ~3.5 s stop→text, no
+daemon) — usable and honours NF2. **(b)** an optional `--serve` warm helper (~1.3 s) is the
+documented upgrade, deferred unless the user asks. LocalBackend keeps load/transcribe
+separable so `--serve` can reuse them. See `external/faster-whisper-blackwell.md`.
 
-## Step 0 — Provision the environment (needs user go-ahead; system change)
-Not code, but blocking and irreversible-ish (installs). Do together, verify each:
-- `sudo apt-get install -y xdotool` (MISSING now).
-- Create `.venv`; `pip install faster-whisper`; confirm CTranslate2 ≥ 4.5.0, CUDA 12.8
-  runtime + cuDNN 9 visible; first-run downloads `large-v3-turbo`.
-- Smoke-test: `python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3-turbo', device='cuda', compute_type='float16')"` loads without `cuBLAS NOT_SUPPORTED` / missing-lib.
-- **Acceptance:** the smoke-test prints model loaded on cuda. If it fails → fall to cpu/api
-  and record the exact error in `external/faster-whisper-blackwell.md` (researched→verified).
+## Step 0 — Provision the environment  ✅ DONE 2026-07-08 (GPU path verified)
+- **faster-whisper 1.2.1 + ctranslate2 4.8.1 + nvidia-cudnn-cu12 9.24 + nvidia-cublas-cu12
+  12.9** in `.venv` (user-space, no sudo). Driver 580.105.08 (CUDA 13.0-capable).
+- **Smoke test PASSED:** float16 `large-v3-turbo` on cuda transcribed jfk.wav to exact
+  ground-truth text (lang=en p=0.96). The cuBLAS pip pkg + `LD_LIBRARY_PATH` recipe are now
+  recorded (verified) in `external/faster-whisper-blackwell.md`.
+- **Recorder verified:** `pw-record` + SIGINT finalises a 16 kHz mono WAV (T3/E11).
+- **REMAINING (user, needs sudo):** `sudo apt-get install -y xdotool` for the `type` sink.
+  Until then Step 1 tests the record→transcribe half and the `clipboard` sink; the `type`/P3
+  accent test runs once xdotool is present.
 
 ## Step 1 — Vertical slice through the riskiest path
 Build the minimum runnable `talkhere --once <secs>`: record a fixed clip → `LocalBackend`

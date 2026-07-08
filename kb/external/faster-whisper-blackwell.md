@@ -1,15 +1,23 @@
 ---
 id: external-faster-whisper-blackwell
 type: external
-summary: Runtime behaviour of faster-whisper/CTranslate2 on the RTX 5060 Ti (Blackwell sm_120) — version matrix, the float16-not-int8 gotcha, model choice, and CPU fallback.
+summary: Verified runtime of faster-whisper/CTranslate2 on the RTX 5060 Ti (Blackwell sm_120) — exact versions, the float16-not-int8 gotcha, the cuBLAS+cuDNN pip+LD_LIBRARY_PATH recipe, measured latency, model choice, CPU fallback.
 domain: external-dependency
-last-updated: 2026-07-03
+last-updated: 2026-07-08
 related: [arch-0001, properties-non-functional]
 ---
 # faster-whisper on Blackwell (RTX 5060 Ti, sm_120)
 
-**Status: researched 2026-07-03, not yet verified on-device.** Step 1 of the plan
-verifies these claims empirically; treat them as the hypothesis to confirm/refute.
+**Status: VERIFIED on pangoline 2026-07-08.** float16 `large-v3-turbo` loads and
+transcribes correctly on the GPU (jfk.wav → exact ground-truth text, lang=en p=0.96).
+Verified stack: driver **580.105.08** (CUDA 13.0-capable), **ctranslate2 4.8.1**,
+**faster-whisper 1.2.1**, **nvidia-cudnn-cu12 9.24**, **nvidia-cublas-cu12 12.9**.
+
+### Measured latency (jfk.wav, 11 s audio, model in HF cache)
+- model load: **2.23 s** · transcribe: **2.59 s** (≈4× real-time).
+- ⇒ per-invocation stop→text ≈ **load 2.2 s + transcribe ~1.3 s (for a 5 s clip) ≈ 3.5 s**;
+  warm (model resident) ≈ **1.3 s** (beats NF1 ≤2 s). This is the Q5 datum: per-invocation
+  is usable, a `--serve` warm helper is snappy. v1 default = per-invocation (no daemon).
 
 ## Why faster-whisper over openai-whisper / whisper.cpp here
 - `faster-whisper` = CTranslate2 reimplementation of Whisper: 4× faster, lower VRAM,
@@ -22,16 +30,26 @@ verifies these claims empirically; treat them as the hypothesis to confirm/refut
   third backend. Not built in v1 unless Step 1 forces it.
 
 ## Version matrix required for sm_120 (Blackwell)
-| Component | Minimum | Why |
-|-----------|---------|-----|
-| NVIDIA driver / CUDA runtime | **CUDA 12.8+** | CUDA ≤ 11.8 tops out at sm_90; sm_120 needs 12.8 |
-| cuDNN | **9.x** | CTranslate2 ≥ 4.5.0 links cuDNN 9 (needs CUDA ≥ 12.3) |
-| CTranslate2 | **≥ 4.5.0** | earlier builds lack sm_120 / crash on new tensor-core padding |
-| faster-whisper | recent (pulls CT2 ≥ 4.5) | — |
+| Component | Minimum / verified | Why |
+|-----------|--------------------|-----|
+| NVIDIA driver | 580.x (CUDA 12.8+/13.0) | CUDA ≤ 11.8 tops out at sm_90; sm_120 needs 12.8+ |
+| CTranslate2 | ≥ 4.5.0 (**used 4.8.1**) | earlier builds lack sm_120 / crash on new tensor-core padding |
+| faster-whisper | **1.2.1** | pulls CT2; clean `WhisperModel` API |
+| nvidia-cudnn-cu12 | 9.x (**9.24**) | CT2 needs cuDNN 9 (`libcudnn_ops.so.9`) |
+| nvidia-cublas-cu12 | 12.x (**12.9**) | CT2 needs `libcublas.so.12` — a SEPARATE pip pkg, NOT bundled |
 
-Install shape (to confirm in Step 1): a venv with `pip install faster-whisper`, ensuring
-the CTranslate2 wheel is ≥ 4.5.0 and CUDA 12.8 libs are visible. cuDNN 9 libs must be on
-the loader path (common failure: `libcudnn_ops.so.9 not found`).
+### Install + launch recipe (the two non-obvious failures, both hit + solved)
+`pip install faster-whisper nvidia-cudnn-cu12 nvidia-cublas-cu12` in a venv. Neither the
+driver nor a CUDA toolkit is required (no `nvcc`); the pip wheels carry the runtime.
+**But** CTranslate2 dlopens cuDNN/cuBLAS at model-load and does NOT find the pip-installed
+libs on its own — the process MUST run with those dirs on `LD_LIBRARY_PATH`:
+```
+LD_LIBRARY_PATH="$(python -c "import glob,sysconfig,os;\
+print(':'.join(glob.glob(os.path.join(sysconfig.get_paths()['purelib'],'nvidia','*','lib'))))")"
+```
+Failure signatures seen without it: `Library libcublas.so.12 is not found or cannot be
+loaded` (missing cuBLAS pkg or path); analogous `libcudnn_ops.so.9`. talkhere's LocalBackend
+sets this env from its own venv before importing faster_whisper.
 
 ## THE gotcha: use float16, not int8
 On RTX 50-series, `compute_type="int8"` / `int8_float16` **crashes** with
@@ -67,11 +85,11 @@ text = "".join(s.text for s in segments).strip()
 Use a smaller model (`small`/`medium`) on CPU to keep latency sane.
 
 ## Agent notes
-> Load the model ONCE per process, but talkhere is short-lived per utterance, so model
-> load time (seconds) would dominate latency. Mitigation options to decide in Step 1:
-> (a) accept per-invocation load with a small/turbo model; (b) a tiny persistent
-> "transcriber" helper process the STOP path talks to; (c) keep model warm via an
-> optional `--serve` mode. Measure first (NF1) before adding complexity.
+> **Model-load decision (Q5), now measured:** load is ~2.2 s, transcribe ~1.3 s for a 5 s
+> clip. v1 default is **per-invocation load** (no daemon, ~3.5 s stop→text) — simplest and
+> honours NF2. A `--serve` warm helper (model resident, ~1.3 s) is the documented upgrade
+> for anyone wanting sub-2 s; design LocalBackend so the model-load and transcribe steps are
+> separable so `--serve` can reuse them. Do NOT add the helper in v1 unless the user asks.
 
 ## Sources
 - SYSTRAN/faster-whisper (GitHub), issues #1086 #1401 on CUDA/CT2 versions.
