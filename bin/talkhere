@@ -1,0 +1,8 @@
+#!/bin/sh
+# talkhere launcher — runs the tool from its own venv so the local faster-whisper
+# backend is importable no matter how it's invoked (i3 hotkey, shell, i3blocks).
+# Symlink this onto your PATH: ln -s <repo>/bin/talkhere ~/.local/bin/talkhere
+# (mirrors revisor's ~/.local/bin/revisor). readlink -f resolves that symlink so the
+# venv/script paths are found relative to the real repo location.
+here="$(dirname "$(readlink -f "$0")")"
+exec "$here/../.venv/bin/python" "$here/../talkhere.py" "$@"

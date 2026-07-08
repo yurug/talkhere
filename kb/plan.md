@@ -63,14 +63,14 @@ Turn the `--once` slice into the real product:
 - **Acceptance:** one hotkey starts/stops dictation with clear cues; double-press is safe (P8);
   a killed recorder self-heals; text lands in whatever window is focused.
 - Properties: P1, P7 (degrade), P8, P9; NF2, NF6.
-- **Status 2026-07-08 — code DONE; desktop wiring pending.** `talkhere.py` has the toggle
-  state machine (`recording.json` + `flock`), detached START/`stop_recorder_pid` (SIGINT),
-  `--stop`/`--cancel`/`--status`, stale-pid recovery. 17 unit tests pass (P1/P8/E9 + P4 lang
-  from state). Verified live: START→--status(recording)→--cancel→idle; a seeded STOP
-  transcribed jfk.wav→clipboard; a dead-pid state self-healed. **Remaining:**
-  `~/.local/bin/talkhere` venv wrapper, i3 `bindsym $mod+Shift+d` (approved) + optional
-  cancel binding, i3blocks `--status` indicator — a live-desktop change (also sync dotfiles
-  bootstrap.sh + MACHINE.md per ~/CLAUDE.md).
+- **Status 2026-07-08 — DONE.** `talkhere.py` has the toggle state machine (`recording.json`
+  + `flock`), detached START/`stop_recorder_pid` (SIGINT), `--stop`/`--cancel`/`--status`,
+  stale-pid recovery. 17 unit tests pass (P1/P8/E9 + P4 lang from state). **Desktop wired:**
+  `bin/talkhere` venv wrapper → `~/.local/bin/talkhere`; i3 `bindsym $mod+t` toggles +
+  `$mod+Shift+t` cancels (chosen because `$mod+Shift+d` was taken by rofi-run); i3blocks mic
+  indicator (RTMIN+4, file-state, no polling). **Verified live** (simulated keypress):
+  Super+t→recording+🎙 indicator; Super+Shift+t→idle. dotfiles i3/i3blocks edited (left
+  uncommitted — repo has the user's WIP); bootstrap.sh/MACHINE.md xdotool sync pending user.
 
 ## Step 3 — Resilience, config, sinks, polish
 - Full fallback ladder cuda→cpu→api (P10); `config.toml` + env precedence (P11);

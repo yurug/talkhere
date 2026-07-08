@@ -6,9 +6,9 @@ spoken-input sibling of [revisor](../../../perso/dev/revisor) — same KISS spir
 script, done right. Transcription runs **locally** on the GPU by default (private, offline,
 no per-use cost), with an OpenAI-API fallback.
 
-> Status: **Step 1 complete** (the record → transcribe → deliver slice; `--once` mode).
-> The single-hotkey toggle UX is Step 2 (`kb/plan.md`). Built with the spec-driven method
-> in `kb/` — start at `kb/INDEX.md`.
+> Status: **Steps 1–2 complete** — record → transcribe → deliver, driven by a single
+> toggle hotkey. Step 3 (resilience/config polish + audit) remains (`kb/plan.md`). Built
+> with the spec-driven method in `kb/` — start at `kb/INDEX.md`.
 
 ## Install
 
@@ -35,14 +35,32 @@ Hugging Face cache.
 backend needs only `curl` + an OpenAI key: `OPENAI_API_KEY`, else the GNOME keyring entry
 `service=revisor key=api-key` (shared with revisor).
 
-## Usage (Step 1)
+### 3. Hotkey (the way you actually use it)
+Symlink the launcher onto your PATH and bind it in i3:
+```bash
+ln -s "$PWD/bin/talkhere" ~/.local/bin/talkhere      # runs talkhere from its venv
+```
+```
+# ~/.config/i3/config
+bindsym $mod+t exec --no-startup-id "$HOME/.local/bin/talkhere; pkill -RTMIN+4 i3blocks"
+bindsym $mod+Shift+t exec --no-startup-id "$HOME/.local/bin/talkhere --cancel; pkill -RTMIN+4 i3blocks"
+```
+Optional i3blocks mic indicator: a `talkhere` block (`signal=4`) that shows 🎙 while
+recording — see this repo's dotfiles for the block script.
+
+## Usage
+
+**Toggle (normal use):** press **`$mod+t`** — a cue confirms recording started; speak; press
+**`$mod+t`** again — the text is typed at your cursor. **`$mod+Shift+t`** cancels.
 
 ```bash
-.venv/bin/python talkhere.py --once 4          # record 4s, transcribe, type at the cursor
-.venv/bin/python talkhere.py --once 4 --sink clipboard   # put it on the clipboard instead
-.venv/bin/python talkhere.py --once 4 --lang fr          # force French
-.venv/bin/python talkhere.py --once 4 --backend api      # transcribe via OpenAI
-.venv/bin/python talkhere.py --status                    # idle|recording (exit 0|1)
+# scripting / one-shot forms:
+talkhere --once 4                # record 4s, transcribe, type at the cursor
+talkhere --once 4 --sink clipboard   # put it on the clipboard instead
+talkhere --lang fr               # force French for this utterance
+talkhere --backend api           # transcribe via OpenAI instead of the local GPU
+talkhere --stop                  # force-stop an in-progress recording
+talkhere --status                # idle|recording (exit 0|1) — for i3blocks
 ```
 
 Optional `~/.talkhere.prompt` biases Whisper's spelling of names/jargon; optional
