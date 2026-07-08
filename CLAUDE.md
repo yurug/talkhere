@@ -45,8 +45,10 @@ This project is built with the **Agentic Dev Kit** spec-driven method
   INT8 crashes).
 - **Audio:** PipeWire (`pw-record`, `pactl`) + ALSA (`arecord`) + `ffmpeg`/`sox`.
 - **Feedback:** `notify-send`/`dunst`, `paplay`, `i3blocks`.
-- **Secrets:** OpenAI key in GNOME keyring (`secret-tool`), service `revisor`, key
-  `api-key` (reused by the API backend). Never hard-code keys.
+- **Secrets:** OpenAI key (API backend) from `OPENAI_API_KEY` or GNOME keyring; the keyring
+  service/key are configurable (`TALKHERE_KEYRING_SERVICE`/`_KEY`, default `talkhere`/
+  `api-key`). To reuse the existing revisor key here: `export TALKHERE_KEYRING_SERVICE=revisor`.
+  Never hard-code keys.
 - pangolin (laptop) has no such GPU → it must fall back to the API or CPU backend.
 
 ## Non-negotiable conventions
