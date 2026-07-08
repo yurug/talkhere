@@ -1,0 +1,21 @@
+#!/bin/sh
+# talkhere pre-commit — mechanical KB validation.
+#
+# The KB (kb/) is the source of truth; the Agentic Dev Kit method makes its
+# invariants machine-checked rather than merely requested. When any kb/ file is
+# staged, kb-lint must pass (errors AND warnings, via --strict) before the commit
+# lands: links resolve, files stay small, frontmatter present, `last-updated` honest,
+# every directory routed by an INDEX. Bypass in a genuine emergency with
+# `git commit --no-verify`.
+#
+# Enabled via `git config core.hooksPath .githooks` (see README / bootstrap).
+
+if git diff --cached --name-only | grep -q '^kb/'; then
+    echo "kb-lint: validating knowledge base…"
+    if ! python3 tools/kb-lint.py kb --strict; then
+        echo "" >&2
+        echo "kb-lint FAILED — fix the findings above (KB errors are build failures)." >&2
+        echo "To bypass in an emergency: git commit --no-verify" >&2
+        exit 1
+    fi
+fi

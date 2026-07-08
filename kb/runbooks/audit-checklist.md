@@ -3,7 +3,7 @@ id: runbook-audit-checklist
 type: procedure
 summary: Multi-axis quality gate to run (Ralph Loop) before declaring a slice done.
 domain: quality
-last-updated: 2026-07-03
+last-updated: 2026-07-08
 related: [properties-functional, properties-non-functional, spec-error-taxonomy]
 ---
 # Audit checklist (Phase 5 gate)
@@ -34,9 +34,9 @@ Run each axis as an independent pass; fix all criticals/highs; re-audit until 0 
 - [ ] `--help` documents flags incl. the inverted `--status` exit code.
 
 ## 5. Spec compliance
-- [ ] Each `spec/` claim maps to code. Flags in `cli-and-config.md` all implemented or
+- [ ] Each `spec/` claim maps to code. Flags in `spec/cli-and-config.md` all implemented or
       explicitly deferred.
-- [ ] Fallback ladder (backend + sink) behaves as `error-taxonomy.md` specifies.
+- [ ] Fallback ladder (backend + sink) behaves as `spec/error-taxonomy.md` specifies.
 
 ## 6. Simplicity
 - [ ] Still one file, no gratuitous dependency. Anything added earns its place vs KISS.

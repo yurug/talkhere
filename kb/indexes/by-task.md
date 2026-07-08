@@ -3,14 +3,14 @@ id: index-by-task
 type: index
 summary: "Given my task, what do I load?" — ordered reading bundles for implement / debug / test / extend.
 domain: meta
-last-updated: 2026-07-03
+last-updated: 2026-07-08
 ---
 # By-task routing table
 
 ## Implement (a slice from plan.md)
 1. `plan.md` — the step and its acceptance criteria.
 2. `spec/algorithms.md` — the state machine you're realising.
-3. `properties/functional.md` + `edge-cases.md` — the P/T IDs the step must satisfy.
+3. `properties/functional.md` + `properties/edge-cases.md` — the P/T IDs the step must satisfy.
 4. The `external/` file for any dependency the step touches (backend → faster-whisper /
    openai; sink → xdotool; recorder → audio-capture).
 5. `architecture/overview.md` — the interface you implement against.
@@ -24,7 +24,7 @@ last-updated: 2026-07-03
 4. `~/.talkhere.log` — the runtime trace (NF6).
 
 ## Test (add/repair tests)
-1. `properties/functional.md` + `non-functional.md` + `edge-cases.md` — the catalogue.
+1. `properties/functional.md` + `properties/non-functional.md` + `properties/edge-cases.md` — the catalogue.
 2. `conventions/code-and-testing.md` — naming (`test_P3_…`), fakes, Xvfb integration.
 3. `runbooks/audit-checklist.md` — the coverage gate.
 

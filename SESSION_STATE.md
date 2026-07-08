@@ -19,6 +19,19 @@ The KB under `kb/` is the source of truth. Start at `kb/INDEX.md`.
   toggle hotkey + lockfile (no daemon); xdotool `type` sink degrading to clipboard;
   auto-detect language + override.
 
+## Harness update (2026-07-08) — adopted the refreshed Agentic Dev Kit
+- **kb-lint** vendored at `tools/kb-lint.py`; KB now passes `kb-lint kb --strict` (26 files,
+  0/0). Fixed a brace-glob link, added `architecture/decisions/INDEX.md`, path-qualified
+  bare links, de-orphaned the spec/properties sub-indexes.
+- **pre-commit hook** `.githooks/pre-commit` (enabled via `git config core.hooksPath
+  .githooks`) runs kb-lint --strict on any staged `kb/` change; verified it blocks a broken
+  link and passes clean. Bypass: `git commit --no-verify`.
+- **CLAUDE.md** gained the *KB routing protocol* (read INDEX first, same-commit KB rule,
+  lint gate).
+- **PENDING (needs user OK):** the SessionStart hook that injects `kb/INDEX.md` into context
+  each session — writing `.claude/settings.json` was blocked as agent self-modification.
+  Snippet to add is in `~/work/dev/agentic-dev-kit/templates/settings/kb-sessionstart.settings.json`.
+
 ## GATE — waiting on the user
 1. Answer/confirm `kb/questions-round1.md` (esp. Q5 model-load-latency vs no-daemon,
    Q7 hotkey, Q8 repo location/publish).
