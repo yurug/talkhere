@@ -6,8 +6,8 @@ spoken-input sibling of [revisor](../../../perso/dev/revisor) — same KISS spir
 script, done right. Transcription runs **locally** on the GPU by default (private, offline,
 no per-use cost), with an OpenAI-API fallback.
 
-> Status: **Steps 1–2 complete** — record → transcribe → deliver, driven by a single
-> toggle hotkey. Step 3 (resilience/config polish + audit) remains (`kb/plan.md`). Built
+> Status: **working** — all three plan steps complete (record → transcribe → deliver via a
+> single toggle hotkey; local GPU Whisper with CPU/API fallbacks; accents verified). Built
 > with the spec-driven method in `kb/` — start at `kb/INDEX.md`.
 
 ## Install

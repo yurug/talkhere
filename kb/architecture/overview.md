@@ -3,15 +3,20 @@ id: arch-overview
 type: concept
 summary: Module structure — a thin orchestrator over two pluggable interfaces (STT backend, delivery sink) plus recorder and feedback helpers.
 domain: architecture
-last-updated: 2026-07-03
+last-updated: 2026-07-08
 depends-on: [spec-algorithms]
 related: [arch-0001, arch-0002, arch-0003]
 ---
 # Architecture overview
 
 Single Python file `talkhere.py` (KISS, revisor-style), internally organised as a thin
-orchestrator over small, testable units. Not split into a package unless it outgrows
-~400 lines. Dependency injection via parameters/factories so tests supply fakes.
+orchestrator over small, testable units with banner-comment sections. **Deliberately kept
+one file** (matches revisor and the "one script" mandate in the project CLAUDE.md; the venv
+wrapper handles launch). As of 2026-07-08 it is ~700 lines — but ~40% of that is literate
+docstrings/comments (the ADK style), not logic. Split into a package only if *logic*
+complexity (not doc volume) demands it, e.g. past ~500 lines of actual code or when a
+section grows its own submodules. Dependency injection via parameters/factories so tests
+supply fakes.
 
 ## Dependency graph
 

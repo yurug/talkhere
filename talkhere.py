@@ -335,9 +335,11 @@ class ApiBackend:
         key = self._key()
         if not key:
             log("api: no key (env/keyring)"); return ""
-        cmd = ["curl", "-sS", "--max-time", "120",
+        # The Authorization header carries the secret, so pass it via curl's stdin config
+        # (-K -) instead of argv — keeps the key out of `ps` output. Non-secret form fields
+        # stay in argv.
+        cmd = ["curl", "-sS", "--max-time", "120", "-K", "-",
                "https://api.openai.com/v1/audio/transcriptions",
-               "-H", f"Authorization: Bearer {key}",
                "-F", f"model={self.model}", "-F", "response_format=text",
                "-F", f"file=@{wav_path}"]
         if lang != "auto":
@@ -346,7 +348,8 @@ class ApiBackend:
         if prompt:
             cmd += ["-F", f"prompt={prompt}"]         # T9
         try:
-            out = subprocess.run(cmd, capture_output=True, text=True, timeout=125)
+            out = subprocess.run(cmd, input=f'header = "Authorization: Bearer {key}"\n',
+                                 capture_output=True, text=True, timeout=125)
             if out.returncode != 0:
                 log(f"api: curl rc={out.returncode} err={out.stderr[:200]!r}"); return ""
             return out.stdout.strip()

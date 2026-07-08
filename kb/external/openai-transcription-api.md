@@ -3,7 +3,7 @@ id: external-openai-transcription-api
 type: external
 summary: The OpenAI audio-transcription endpoint for the api backend — request shape, key sourcing (reuse revisor keyring), language param, and cost/latency notes.
 domain: external-dependency
-last-updated: 2026-07-03
+last-updated: 2026-07-08
 related: [arch-0001, spec-cli-and-config]
 ---
 # OpenAI transcription API (the `api` backend)
@@ -15,13 +15,16 @@ dependency** (keeps NF3: api backend runs without faster-whisper or `openai` ins
 ## Endpoint
 `POST https://api.openai.com/v1/audio/transcriptions` — multipart form upload.
 ```
-curl -sS https://api.openai.com/v1/audio/transcriptions \
-  -H "Authorization: Bearer $KEY" \
+# Auth header via curl's stdin config (-K -), NOT argv, so the key never shows in `ps`:
+printf 'header = "Authorization: Bearer %s"\n' "$KEY" | \
+curl -sS -K - https://api.openai.com/v1/audio/transcriptions \
   -F model=whisper-1 \
   -F "language=fr" \        # omit for auto-detect (P4)
   -F "response_format=text" \
   -F file=@<wav_path>
 ```
+**Verified live 2026-07-08:** jfk.wav → exact transcript in ~2.3 s. The `-K -` (key on
+stdin) form is what talkhere ships — it keeps the secret out of the process argv.
 - `model`: `whisper-1` default (`TALKHERE_API_MODEL`); newer `gpt-4o-transcribe` /
   `gpt-4o-mini-transcribe` are options if desired — same endpoint shape.
 - `language`: ISO-639-1 (`fr`/`en`); omit for auto-detect. `response_format=text` returns

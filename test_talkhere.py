@@ -251,6 +251,89 @@ def test_cancel_stops_recorder_and_injects_nothing(runtime, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Step 3: config, prompt bias, backend fallback ladder, api key, paste sink
+# ---------------------------------------------------------------------------
+def test_config_toml_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.delenv("TALKHERE_SINK", raising=False)
+    monkeypatch.delenv("TALKHERE_MODEL", raising=False)
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('sink = "clipboard"\ntrailing_space = false\n[local]\nmodel = "medium"\n')
+    monkeypatch.setattr(talkhere, "CONFIG_FILE", cfg)
+    loaded = talkhere.load_config()
+    assert loaded["sink"] == "clipboard"
+    assert talkhere.resolve(ns(), loaded, "sink", "TALKHERE_SINK", "type") == "clipboard"
+    assert talkhere.resolve(ns(), loaded, "local.model", "TALKHERE_MODEL", "large-v3-turbo") == "medium"
+
+
+def test_T9_prompt_bias(tmp_path, monkeypatch):
+    pf = tmp_path / ".talkhere.prompt"
+    monkeypatch.setattr(talkhere, "PROMPT_FILE", pf)
+    assert talkhere.read_prompt() is None                       # absent → no bias
+    pf.write_text("Nomadic Labs, OCaml, Tezos\n")
+    assert talkhere.read_prompt() == "Nomadic Labs, OCaml, Tezos"
+
+
+def test_P10_cuda_failure_falls_back_to_cpu(monkeypatch):
+    fw = pytest.importorskip("faster_whisper")
+    calls = []
+
+    def fake_model(name, device, compute_type):
+        calls.append((device, compute_type))
+        if device == "cuda":
+            raise RuntimeError("simulated cuda init failure")
+        return object()
+
+    monkeypatch.setattr(fw, "WhisperModel", fake_model)
+    monkeypatch.setattr(talkhere.LocalBackend, "_preload_cuda_libs", staticmethod(lambda: None))
+    monkeypatch.setattr(talkhere, "log", lambda *a: None)
+    be = talkhere.LocalBackend("m", "cuda", "float16")
+    be._load()
+    assert be.device == "cpu"                                   # cascaded to cpu (P10/E5)
+    assert calls == [("cuda", "float16"), ("cpu", "int8")]
+
+
+def test_E6_int8_forced_to_float16_on_cuda(monkeypatch):
+    monkeypatch.setattr(talkhere, "log", lambda *a: None)
+    be = talkhere.LocalBackend("m", "cuda", "int8")             # int8 crashes on Blackwell
+    assert be.compute_type == "float16"                         # overridden (E6)
+
+
+def test_api_key_env_beats_keyring(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-fromenv")
+    assert talkhere.ApiBackend._key() == "sk-fromenv"
+
+
+def test_api_no_key_returns_empty_and_does_not_log_key(monkeypatch):
+    monkeypatch.setattr(talkhere.ApiBackend, "_key", staticmethod(lambda: None))
+    logs = []
+    monkeypatch.setattr(talkhere, "log", lambda m: logs.append(m))
+    assert talkhere.ApiBackend("whisper-1").transcribe("x.wav", "auto") == ""
+    assert not any("sk-" in m for m in logs)                    # NF6 / security: no key leak
+
+
+def test_P9_no_recorder_is_actionable_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(talkhere, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(talkhere, "_recorder_cmd", lambda w: None)   # no pw-record/arecord
+    notes = []
+    monkeypatch.setattr(talkhere, "notify", lambda *a, **k: notes.append(a))
+    rc = talkhere.cmd_once(2.0, {}, ns(), verbose=False)
+    assert rc == 1 and notes                                        # exit 1 + a notification (P9/E2)
+
+
+def test_paste_sink_sets_clipboard_then_pastes(monkeypatch):
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append((cmd, kw.get("input")))
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(talkhere.subprocess, "run", fake_run)
+    talkhere.PasteSink(paste_key="ctrl+shift+v").deliver("héllo")
+    assert calls[0][0][:2] == ["xclip", "-selection"] and calls[0][1] == "héllo"
+    assert calls[1][0] == ["xdotool", "key", "--clearmodifiers", "ctrl+shift+v"]
+
+
+# ---------------------------------------------------------------------------
 # Integration (GPU) — self-skips when faster-whisper / cuda absent
 # ---------------------------------------------------------------------------
 @pytest.mark.integration

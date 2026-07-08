@@ -79,6 +79,12 @@ Turn the `--once` slice into the real product:
 - Logging pass (NF6, secret-safe); pangolin cpu/api portability check (NF5).
 - Full test suite: every P/T named-test; Xvfb integration for P3; run Phase-5 audit gate.
 - **Acceptance:** `runbooks/audit-checklist.md` passes 0 criticals; runs on both machines.
+- **Status 2026-07-08 — DONE.** Fallback ladder verified live (API 2.3 s + CPU both
+  transcribe jfk.wav); config.toml round-trip honoured live; `~/.talkhere.prompt` bias +
+  `--lang` override; api key moved to curl stdin (`-K -`, off argv). 25 unit + 1 GPU
+  integration test green. Phase-5 audit: 0 criticals — see
+  `reports/audit-2026-07-08-phase5.md`. NF5 note: GPU-less hosts should prefer `api` (CPU
+  works but ~24 s/clip). **All three implementation steps complete.**
 
 ## Notes
 - 3 code steps (+ Step 0 provisioning, + Phase-5 audit) — within the ADK 3–4 limit. If any

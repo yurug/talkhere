@@ -40,7 +40,9 @@ reading bundle.
 - `reports/` — premortem/audit/quiz artifacts (added as generated).
 
 ## Status
-Phases 0–3 of the ADK method complete: env researched, KB written, plan drafted. The KB is
-mechanically validated — `tools/kb-lint.py kb --strict`, wired into `.githooks/pre-commit`.
-**Gate:** awaiting user answers in `questions-round1.md` and approval of `plan.md` before
-Step 0 provisioning + Phase 4 implementation. File count: 26 KB files.
+**Implemented and working (2026-07-08).** All three plan steps done: `talkhere.py` is a
+toggle-hotkey talk-to-type tool (i3 `$mod+t`), local faster-whisper on the GPU by default
+with CPU/API fallbacks, xdotool `type` delivery (accents verified). 25 unit + 1 GPU
+integration test pass; Phase-5 audit 0 criticals (`reports/audit-2026-07-08-phase5.md`).
+KB mechanically validated (`tools/kb-lint.py kb --strict`, pre-commit hook). Remaining:
+optional `--serve` warm helper; pangolin (laptop) portability check; publish decision (Q8).
