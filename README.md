@@ -27,21 +27,24 @@ spirit — one script, one job, done well.
 
 ## Requirements
 
-- **Linux with X11** (Wayland is out of scope for now — it relies on `xdotool`). Any window
+- **Linux.** On **X11** everything works (typing at the cursor via `xdotool`). On **Wayland**
+  the *clipboard* sink works (`--sink clipboard`, via `wl-copy`) — great with a clipboard
+  manager like KDE **Klipper** — but typing at the cursor does not (it needs X11). Any window
   manager; i3 is what the hotkey examples use.
 - **Python 3.11+**, a **microphone**, and one of:
   - an **NVIDIA GPU** with a recent driver (CUDA 12.8+ capable) for the local backend, **or**
   - an **OpenAI API key** for the API backend (no GPU needed), **or**
   - just a CPU (slower, but works).
-- System tools: `xdotool` (typing), `xclip` (clipboard sink), an audio recorder
-  (`pw-record` from PipeWire, or `arecord` from ALSA), and optionally `notify-send`/`paplay`
-  for cues.
+- System tools: an audio recorder (`pw-record` from PipeWire, or `arecord` from ALSA); for
+  delivery, `xdotool` + `xclip` on **X11**, or `wl-clipboard` (`wl-copy`) on **Wayland**;
+  optionally `notify-send`/`paplay` for cues.
 
 ## Install
 
 ```bash
 # 1. System tools (Debian/Ubuntu example)
 sudo apt-get install -y xdotool xclip pipewire-bin libnotify-bin pulseaudio-utils
+#   On Wayland (e.g. KDE Plasma) also/instead: sudo apt-get install -y wl-clipboard
 #   (alsa-utils provides `arecord` as an audio fallback)
 
 # 2. The tool + Python deps in a venv
@@ -161,6 +164,8 @@ i3blocks` in the bindings above.
 
 - **Nothing gets typed** → is `xdotool` installed? Without it, talkhere falls back to the
   clipboard and notifies you — just paste. Check `~/.talkhere.log`.
+- **On Wayland nothing types** → expected: typing needs X11. Use `--sink clipboard` (install
+  `wl-clipboard`) and paste — with KDE Klipper it lands in your clipboard history.
 - **`libcublas.so.12 not found` / `libcudnn…`** → install the GPU wheels
   (`pip install -r requirements.txt`), or use `--backend api` / `TALKHERE_DEVICE=cpu`.
 - **`cuBLAS … NOT_SUPPORTED` on a 50-series GPU** → keep `compute_type=float16` (the default).

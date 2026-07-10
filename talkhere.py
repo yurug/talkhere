@@ -73,6 +73,13 @@ def whereis(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
 
+def _is_wayland() -> bool:
+    """True on a Wayland session. talkhere types via xdotool (X11 only), so on Wayland only
+    the clipboard sink works — and it must use wl-copy rather than xclip."""
+    return (os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+            or bool(os.environ.get("WAYLAND_DISPLAY")))
+
+
 def notify(summary: str, body: str = "") -> None:
     """Fire a desktop notification. The tool is launched from a hotkey with no visible
     terminal, so this — not stderr — is the user-facing channel (kb/spec/error-taxonomy).
@@ -423,14 +430,28 @@ class PasteSink:
 
 
 class ClipboardSink:
-    """Put text on the clipboard; the user pastes it. Most robust, least magic — and the
-    universal degradation target so recognised text is never lost (P7)."""
+    """Put text on the clipboard; the user pastes it (or a clipboard manager such as KDE
+    Klipper keeps it in history). Most robust, least magic — and the universal degradation
+    target so recognised text is never lost (P7). Session-aware: wl-copy on Wayland, xclip on
+    X11, so `--sink clipboard` works under both display servers (the only sink that does on
+    Wayland, since type/paste need xdotool)."""
+
+    def _cmd(self) -> list[str] | None:
+        """The clipboard command for this session, or None if no tool is installed. Prefer the
+        session's native tool; fall back to the other if only that one is present."""
+        wl = ["wl-copy"] if whereis("wl-copy") else None
+        xc = ["xclip", "-selection", "clipboard"] if whereis("xclip") else None
+        order = (wl, xc) if _is_wayland() else (xc, wl)
+        return next((c for c in order if c is not None), None)
 
     def available(self) -> bool:
-        return whereis("xclip")
+        return self._cmd() is not None
 
     def deliver(self, text: str) -> None:
-        subprocess.run(["xclip", "-selection", "clipboard"], input=text, text=True, check=True)
+        cmd = self._cmd()
+        if cmd is None:
+            raise RuntimeError("no clipboard tool (install wl-clipboard on Wayland, xclip on X11)")
+        subprocess.run(cmd, input=text, text=True, check=True)
 
 
 def resolve_sink(cfg: dict, args) -> tuple[Sink | None, str]:
@@ -448,9 +469,11 @@ def resolve_sink(cfg: dict, args) -> tuple[Sink | None, str]:
     clip = ClipboardSink()
     if clip.available():
         log(f"sink: {choice} unavailable, degraded to clipboard (P7)")
-        notify("talkhere: text on clipboard", f"install the tool for '{choice}' sink; paste manually")
+        hint = ("typing needs X11 — text is on the clipboard, paste it (or grab it from Klipper)"
+                if _is_wayland() else f"install the tool for the '{choice}' sink; paste manually")
+        notify("talkhere: text on clipboard", hint)
         return clip, f"clipboard (degraded from {choice})"
-    return None, "no sink available (install xclip)"
+    return None, "no sink available (install wl-clipboard on Wayland, or xclip on X11)"
 
 
 # ---------------------------------------------------------------------------

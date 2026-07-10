@@ -140,6 +140,43 @@ def test_P7_no_sink_when_even_xclip_missing(monkeypatch):
     assert sink is None
 
 
+# --- Wayland: the clipboard sink is session-aware (wl-copy) so it works on KDE/Klipper ---
+def _capture_run(monkeypatch):
+    calls = []
+    monkeypatch.setattr(talkhere.subprocess, "run",
+                        lambda cmd, **k: calls.append((cmd, k.get("input")))
+                        or types.SimpleNamespace(returncode=0))
+    return calls
+
+
+def test_clipboard_sink_uses_wl_copy_on_wayland(monkeypatch):
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setattr(talkhere, "whereis", lambda c: c in {"wl-copy", "xclip"})
+    calls = _capture_run(monkeypatch)
+    talkhere.ClipboardSink().deliver("bonjour")
+    assert calls[0][0] == ["wl-copy"] and calls[0][1] == "bonjour"
+
+
+def test_clipboard_sink_uses_xclip_on_x11(monkeypatch):
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setattr(talkhere, "whereis", lambda c: c in {"wl-copy", "xclip"})
+    calls = _capture_run(monkeypatch)
+    talkhere.ClipboardSink().deliver("hello")
+    assert calls[0][0][0] == "xclip" and calls[0][1] == "hello"
+
+
+def test_P7_wayland_type_degrades_to_wl_copy_clipboard(monkeypatch):
+    # On Wayland xdotool is absent → the `type` default degrades to the clipboard, backed by
+    # wl-copy (the KDE/Klipper use case). Text is never lost.
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setattr(talkhere, "whereis", lambda c: c == "wl-copy")   # no xdotool/xclip
+    monkeypatch.setattr(talkhere, "notify", lambda *a, **k: None)
+    sink, note = talkhere.resolve_sink({}, ns(sink="type"))
+    assert isinstance(sink, talkhere.ClipboardSink) and sink.available()
+    assert "clipboard" in note
+
+
 # ---------------------------------------------------------------------------
 # P3 — accent path: TypeSink must feed text via stdin (--file -), never argv
 # ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ id: prd
 type: spec
 summary: Product requirements — talkhere lets you dictate text into any focused X11 window via a single toggle hotkey.
 domain: product
-last-updated: 2026-07-03
+last-updated: 2026-07-10
 depends-on: [glossary]
 related: [spec-algorithms, properties-functional]
 ---
@@ -53,8 +53,11 @@ Primary use is a single i3 binding on the no-arg toggle form; flags are for powe
 
 ## Out of scope (v1)
 
-- Wayland injection (`ydotool`/`wtype`) — X11+i3 only for now. Keep the sink pluggable
-  so it can be added, but do not build it.
+- Wayland *typing* at the cursor (`ydotool`/`wtype`) — the `type`/`paste` sinks stay X11
+  (xdotool). **Wayland clipboard delivery IS supported** (2026-07-10): the `clipboard` sink
+  is session-aware and uses `wl-copy` on Wayland, so `--sink clipboard` works there and
+  feeds clipboard managers like KDE Klipper. On Wayland the default `type` sink degrades to
+  this clipboard path automatically (P7).
 - Streaming / live-as-you-speak transcription. v1 is record-then-transcribe.
 - Voice commands / editing by voice ("delete that", "new line" macros) beyond literal
   punctuation Whisper already produces.

@@ -3,7 +3,7 @@ id: arch-0003
 type: decision
 summary: Delivery is a pluggable Sink; default `type` via xdotool with a Unicode-safe path, degrading to clipboard; paste and clipboard sinks available.
 domain: architecture
-last-updated: 2026-07-08
+last-updated: 2026-07-10
 depends-on: [external-xdotool-x11-typing]
 related: [properties-functional, spec-error-taxonomy]
 ---
@@ -13,6 +13,12 @@ related: [properties-functional, spec-error-taxonomy]
 > `xdotool type --file -` injected "Café — déçu, ça va ? 🙂" byte-exact (accents, em-dash,
 > emoji) under us/QWERTY (`tools/p3_livetest.sh`). The `type` default **stands**; the pivot
 > to `paste` is not needed. `paste`/`clipboard` remain as selectable escape hatches (P7).
+>
+> **Update 2026-07-10 — Wayland clipboard:** `ClipboardSink` is now session-aware (uses
+> `wl-copy` on Wayland, `xclip` on X11), so `--sink clipboard` works on Wayland/KDE and feeds
+> clipboard managers like Klipper. `type`/`paste` stay X11 (xdotool); on Wayland the default
+> `type` degrades to this clipboard path. This realises the "keep the sink pluggable" hedge
+> without adding Wayland *typing* (which would need ydotool/uinput).
 
 ## Context
 "talk-to-type" implies text should appear at the cursor, hands-free, in any focused app.
