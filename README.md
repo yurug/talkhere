@@ -189,8 +189,11 @@ TALKHERE_TEST_WAV=/path/to/speech.wav .venv/bin/python -m pytest -m integration 
 tools/p3_livetest.sh                       # live accent-injection check (needs X + xdotool)
 ```
 
-Contributions welcome as long as they keep the KISS spirit: one script, minimal
-dependencies, clear semantics.
+## Philosophy
+
+talkhere follows the KISS principle: it does one specific thing and aims to do it right,
+with minimal dependencies and clear semantics. Contributions are welcome as long as they
+adhere to this philosophy!
 
 ## Credits & License
 
