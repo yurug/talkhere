@@ -3,7 +3,7 @@ id: arch-0003
 type: decision
 summary: Delivery is a pluggable Sink; default `type` via xdotool with a Unicode-safe path, degrading to clipboard; paste and clipboard sinks available.
 domain: architecture
-last-updated: 2026-07-10
+last-updated: 2026-07-13
 depends-on: [external-xdotool-x11-typing]
 related: [properties-functional, spec-error-taxonomy]
 ---
@@ -19,6 +19,16 @@ related: [properties-functional, spec-error-taxonomy]
 > clipboard managers like Klipper. `type`/`paste` stay X11 (xdotool); on Wayland the default
 > `type` degrades to this clipboard path. This realises the "keep the sink pluggable" hedge
 > without adding Wayland *typing* (which would need ydotool/uinput).
+>
+> **Update 2026-07-13 — delivery is TARGETED, not focus-following (P12):** XTEST sends every
+> keystroke to whatever is focused *at that instant*, so the old behaviour typed into whatever
+> window the user had drifted to by STOP — and could even split a sentence across windows when
+> focus moved mid-burst (i3 enables `focus_follows_mouse` by default, so a mouse nudge sufficed).
+> Delivery now refocuses the window captured at START (`windowactivate --sync`), verifies it, and
+> parks the pointer inside it for the whole typing burst (restoring it after). If that window is
+> gone we type **nothing** and fall back to the clipboard (E14). `xdotool type --window` would
+> have made this trivial, but it uses XSendEvent and apps ignore those synthetic events —
+> empirically confirmed — so controlling focus is the only reliable route.
 
 ## Context
 "talk-to-type" implies text should appear at the cursor, hands-free, in any focused app.

@@ -3,7 +3,7 @@ id: spec-cli-and-config
 type: spec
 summary: The full CLI contract (flags, exit codes) and the config/env/file surface for talkhere.
 domain: interface
-last-updated: 2026-07-08
+last-updated: 2026-07-13
 depends-on: [prd, spec-algorithms]
 related: [spec-error-taxonomy]
 ---
@@ -52,6 +52,7 @@ related: [spec-error-taxonomy]
 | `OPENAI_API_KEY` | — | api backend key; else the keyring lookup below |
 | `TALKHERE_KEYRING_SERVICE` | `talkhere` | GNOME keyring `service` for the api key |
 | `TALKHERE_KEYRING_KEY` | `api-key` | GNOME keyring `key` attribute for the api key |
+| `TALKHERE_TARGET_WINDOW` | `start` | `start` = deliver into the window focused when recording began (P12); `current` = old behaviour (wherever focus is at STOP) |
 | `TALKHERE_TRAILING_SPACE` | `1` | append one space after injected text |
 | `TALKHERE_KEEP_WAV` | `0` | keep the utterance wav for debugging |
 
@@ -81,7 +82,7 @@ paste_key = "ctrl+v"        # per-app override, e.g. ctrl+shift+v for terminals
 | `~/.config/talkhere/config.toml` | user config | persistent, git-personal |
 | `~/.talkhere.prompt` | Whisper `initial_prompt` vocabulary bias | persistent |
 | `~/.talkhere.log` | timestamped append log (mirrors revisor) | grows; user-managed |
-| `${XDG_RUNTIME_DIR:-/tmp}/talkhere/recording.json` | state/lock (idle=absent) | per utterance |
+| `${XDG_RUNTIME_DIR:-/tmp}/talkhere/recording.json` | state/lock (idle=absent); holds pid, wav, lang, **window** (delivery target, P12) | per utterance |
 | `${XDG_RUNTIME_DIR:-/tmp}/talkhere/utterance-*.wav` | in-progress audio | deleted after inject |
 
 ## Agent notes

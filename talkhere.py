@@ -80,6 +80,44 @@ def _is_wayland() -> bool:
             or bool(os.environ.get("WAYLAND_DISPLAY")))
 
 
+def _active_window() -> str | None:
+    """X11 id of the currently focused window, or None. This is the *target* we remember at
+    START so the transcript lands where the user began dictating (P12), not wherever focus
+    happens to be seconds later when they stop."""
+    if not whereis("xdotool"):
+        return None
+    try:
+        r = subprocess.run(["xdotool", "getactivewindow"],
+                           capture_output=True, text=True, timeout=2)
+        wid = r.stdout.strip()
+        return wid if r.returncode == 0 and wid else None
+    except Exception:
+        return None
+
+
+def _window_exists(wid: str) -> bool:
+    """True if the window still exists (the user may have closed it while dictating)."""
+    try:
+        r = subprocess.run(["xdotool", "getwindowname", wid],
+                           capture_output=True, text=True, timeout=2)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _mouse_location() -> tuple[str, str, str] | None:
+    """(x, y, window_under_pointer) or None."""
+    try:
+        r = subprocess.run(["xdotool", "getmouselocation", "--shell"],
+                           capture_output=True, text=True, timeout=2)
+        if r.returncode != 0:
+            return None
+        v = dict(line.split("=", 1) for line in r.stdout.splitlines() if "=" in line)
+        return v.get("X", ""), v.get("Y", ""), v.get("WINDOW", "")
+    except Exception:
+        return None
+
+
 def notify(summary: str, body: str = "") -> None:
     """Fire a desktop notification. The tool is launched from a hotkey with no visible
     terminal, so this — not stderr — is the user-facing channel (kb/spec/error-taxonomy).
@@ -476,6 +514,59 @@ def resolve_sink(cfg: dict, args) -> tuple[Sink | None, str]:
     return None, "no sink available (install wl-clipboard on Wayland, or xclip on X11)"
 
 
+@contextlib.contextmanager
+def _focused_on(wid: str):
+    """Hold the keyboard focus on `wid` for the duration of the block, and *keep* it there.
+
+    Why the pointer dance: xdotool types via XTEST, which delivers each keystroke to whatever
+    window is focused *at that instant*. With focus-follows-mouse (i3's default) a stray mouse
+    motion mid-typing hands focus to another window and the rest of the transcript is scattered
+    into it. Parking the pointer inside the target while typing removes that vector; we put it
+    back afterwards. (`xdotool type --window` would avoid all this, but apps ignore those
+    synthetic events — verified — so controlling focus is the only reliable route.)
+
+    Raises RuntimeError if the target cannot be focused: callers must then NOT type (that would
+    inject into the wrong window) and fall back to the clipboard instead.
+    """
+    before = _mouse_location()
+    subprocess.run(["xdotool", "windowactivate", "--sync", wid],
+                   check=True, timeout=5, capture_output=True)
+    if _active_window() != wid:
+        raise RuntimeError(f"could not focus target window {wid}")
+
+    moved = False
+    if before and before[2] != wid:                  # pointer sits over some other window
+        try:
+            subprocess.run(["xdotool", "mousemove", "--window", wid, "10", "10"],
+                           timeout=2, capture_output=True)
+            moved = True
+        except Exception as e:                       # not fatal: typing still works
+            log(f"focus: could not park pointer in {wid}: {e}")
+    try:
+        yield
+    finally:
+        if moved and before:                         # restore the pointer where the user left it
+            subprocess.run(["xdotool", "mousemove", before[0], before[1]],
+                           timeout=2, capture_output=True, check=False)
+
+
+def deliver_focused(sink: Sink, text: str, target_wid: str | None) -> None:
+    """Deliver `text`, first restoring focus to the window the utterance started in (P12).
+
+    Only the focus-dependent sinks (type/paste) need this; the clipboard sink is
+    focus-independent. Raises if the target window is gone or cannot be focused, so the caller
+    falls back to the clipboard rather than typing somewhere unintended.
+    """
+    focus_dependent = isinstance(sink, (TypeSink, PasteSink))
+    if not (focus_dependent and target_wid and whereis("xdotool")):
+        sink.deliver(text)
+        return
+    if not _window_exists(target_wid):
+        raise RuntimeError(f"target window {target_wid} no longer exists")
+    with _focused_on(target_wid):
+        sink.deliver(text)
+
+
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
@@ -490,10 +581,11 @@ def postprocess(text: str, trailing_space: bool) -> str:
 
 
 def transcribe_and_deliver(wav: Path, cfg: dict, args, verbose: bool,
-                           lang: str | None = None) -> int:
+                           lang: str | None = None, target_wid: str | None = None) -> int:
     """Shared STOP-path tail: guard empties, transcribe via the ladder, deliver via the sink.
     Returns a process exit code. Used by --once and the toggle STOP path. `lang` overrides the
-    resolved language (the toggle stores the language chosen at START time)."""
+    resolved language, and `target_wid` is the window that was focused when the utterance
+    STARTED — the transcript is delivered there, not wherever focus drifted to (P12)."""
     dur = wav_duration_ms(wav)
     if dur < MIN_MS:                                   # P5/T1: too short => nothing captured
         log(f"nothing captured (dur={dur}ms < {MIN_MS}ms)")
@@ -527,12 +619,17 @@ def transcribe_and_deliver(wav: Path, cfg: dict, args, verbose: bool,
         log("no sink available"); notify("talkhere: cannot deliver text", note)
         return 1
     try:
-        sink.deliver(text)
-    except Exception as e:                             # a sink tool failed at runtime
-        log(f"sink {note} failed at runtime: {e}; last resort clipboard")
+        # Restore focus to the window the utterance started in, and hold it there while typing
+        # (P12). If that window is gone / unfocusable this RAISES rather than typing into
+        # whatever happens to be focused now — wrong-window injection is the cardinal sin.
+        deliver_focused(sink, text, target_wid)
+    except Exception as e:                             # target gone, or a sink tool failed
+        log(f"sink {note} failed ({e}); last resort clipboard")
         try:
             ClipboardSink().deliver(text)
-            note = "clipboard (sink failed)"
+            note = "clipboard (could not reach the target window)"
+            notify("talkhere: text on clipboard",
+                   "the window you started dictating in is gone — paste it")
         except Exception:
             notify("talkhere: delivery failed", str(e)); return 1
     cue("done")
@@ -552,6 +649,7 @@ def cmd_once(seconds: float, cfg: dict, args, verbose: bool) -> int:
     log(f"--once {seconds}s -> {wav}")
     cue("start")
     notify("talkhere", f"● recording {seconds:g}s")
+    window = _active_window()                          # deliver back here, not wherever focus drifts (P12)
     proc = start_recorder(wav)
     if proc is None:
         notify("talkhere: no recorder", "install pw-record or arecord"); return 1
@@ -559,7 +657,8 @@ def cmd_once(seconds: float, cfg: dict, args, verbose: bool) -> int:
         time.sleep(seconds)
     finally:
         stop_recorder(proc)
-    rc = transcribe_and_deliver(wav, cfg, args, verbose)
+    rc = transcribe_and_deliver(wav, cfg, args, verbose,
+                                target_wid=_target_window(window, cfg, args))
     if os.environ.get("TALKHERE_KEEP_WAV", "0") == "0":
         wav.unlink(missing_ok=True)
     return rc
@@ -622,11 +721,23 @@ def _start(cfg: dict, args) -> int:
         notify("talkhere: no recorder", "install pw-record or arecord")
         return 1
     lang = resolve(args, cfg, "lang", "TALKHERE_LANG", "auto")
-    write_state({"pid": proc.pid, "wav": str(wav), "started": time.time(), "lang": lang})
-    log(f"START recorder pid={proc.pid} wav={wav} lang={lang}")
+    # Remember WHERE the user began dictating. Focus will very likely have moved by the time
+    # they stop (they read, they switch windows while speaking), and the transcript must land
+    # where they started, not wherever the cursor ended up (P12).
+    window = _active_window()
+    write_state({"pid": proc.pid, "wav": str(wav), "started": time.time(), "lang": lang,
+                 "window": window})
+    log(f"START recorder pid={proc.pid} wav={wav} lang={lang} window={window}")
     cue("start")
     notify("talkhere", "● recording — press again to stop")
     return 0
+
+
+def _target_window(st_window: str | None, cfg: dict, args) -> str | None:
+    """Which window should receive the text: the one focused at START (default), or whatever
+    is focused now (`TALKHERE_TARGET_WINDOW=current`, the pre-P12 behaviour)."""
+    mode = resolve(args, cfg, "target_window", "TALKHERE_TARGET_WINDOW", "start")
+    return st_window if mode == "start" else None
 
 
 def _stop(st: dict, cfg: dict, args, verbose: bool) -> int:
@@ -635,7 +746,8 @@ def _stop(st: dict, cfg: dict, args, verbose: bool) -> int:
     wav = Path(st["wav"])
     stop_recorder_pid(int(st["pid"]))
     log(f"STOP recorder pid={st['pid']} wav={wav}")
-    rc = transcribe_and_deliver(wav, cfg, args, verbose, lang=st.get("lang"))
+    rc = transcribe_and_deliver(wav, cfg, args, verbose, lang=st.get("lang"),
+                                target_wid=_target_window(st.get("window"), cfg, args))
     if os.environ.get("TALKHERE_KEEP_WAV", "0") == "0":
         wav.unlink(missing_ok=True)
     return rc

@@ -249,8 +249,8 @@ def _stub_recorder(monkeypatch, alive=True):
     monkeypatch.setattr(talkhere, "_pid_alive", lambda pid: alive)
     monkeypatch.setattr(talkhere, "stop_recorder_pid", lambda pid: stops.append(pid))
     monkeypatch.setattr(talkhere, "transcribe_and_deliver",
-                        lambda wav, cfg, args, verbose, lang=None:
-                        delivered.append((str(wav), lang)) or 0)
+                        lambda wav, cfg, args, verbose, lang=None, target_wid=None:
+                        delivered.append((str(wav), lang, target_wid)) or 0)
     return start_calls, stops, delivered
 
 
@@ -285,6 +285,74 @@ def test_cancel_stops_recorder_and_injects_nothing(runtime, monkeypatch):
     assert talkhere.cmd_cancel() == 0
     assert talkhere.read_state() is None                        # idle
     assert stops == [4242] and delivered == []                  # stopped, nothing delivered (P5)
+
+
+# ---------------------------------------------------------------------------
+# P12 — the transcript lands in the window where dictation STARTED, and stays there
+# ---------------------------------------------------------------------------
+def test_P12_start_remembers_the_focused_window(runtime, monkeypatch):
+    _stub_recorder(monkeypatch)
+    monkeypatch.setattr(talkhere, "_active_window", lambda: "12345")
+    talkhere.cmd_toggle({}, ns(), verbose=False)                 # START
+    assert talkhere.read_state()["window"] == "12345"
+
+
+def test_P12_delivery_refocuses_target_and_guards_the_pointer(monkeypatch):
+    monkeypatch.setattr(talkhere, "whereis", lambda c: True)
+    monkeypatch.setattr(talkhere, "_window_exists", lambda w: True)
+    monkeypatch.setattr(talkhere, "_active_window", lambda: "42")
+    monkeypatch.setattr(talkhere, "_mouse_location", lambda: ("100", "200", "99"))  # pointer elsewhere
+    calls = []
+    monkeypatch.setattr(talkhere.subprocess, "run",
+                        lambda cmd, **k: calls.append((cmd, k.get("input")))
+                        or types.SimpleNamespace(returncode=0))
+    talkhere.deliver_focused(talkhere.TypeSink(8), "salut", "42")
+    flat = [" ".join(c) for c, _ in calls]
+    assert any("windowactivate --sync 42" in f for f in flat)    # focus restored to the target
+    assert any("mousemove --window 42" in f for f in flat)       # pointer parked → no focus steal
+    assert any("xdotool type" in f for f in flat)
+    assert any(inp == "salut" for _, inp in calls)               # text typed via stdin
+    assert flat[-1] == "xdotool mousemove 100 200"               # pointer put back afterwards
+
+
+def test_P12_never_types_into_the_wrong_window_when_target_is_gone(monkeypatch, tmp_path):
+    """The cardinal sin: if the window we started in is gone, DON'T type into whatever is
+    focused now — preserve the text on the clipboard instead."""
+    wav = tmp_path / "u.wav"
+    make_wav(wav, 1000)
+    typed = []
+
+    class RecordingTypeSink(talkhere.TypeSink):
+        def deliver(self, text):
+            typed.append(text)                                   # must never happen
+
+    clipped = []
+    monkeypatch.setattr(talkhere, "resolve_backend", lambda cfg, args: FakeBackend("bonjour"))
+    monkeypatch.setattr(talkhere, "resolve_sink", lambda cfg, args: (RecordingTypeSink(8), "type"))
+    monkeypatch.setattr(talkhere, "whereis", lambda c: True)
+    monkeypatch.setattr(talkhere, "_window_exists", lambda w: False)     # target window closed
+    monkeypatch.setattr(talkhere.ClipboardSink, "deliver",
+                        lambda self, text: clipped.append(text))
+    rc = talkhere.transcribe_and_deliver(wav, {}, ns(), verbose=False, target_wid="999")
+    assert rc == 0
+    assert typed == []                                           # nothing typed anywhere
+    assert clipped == ["bonjour "]                               # text preserved (P7)
+
+
+def test_P12_clipboard_sink_needs_no_focus_dance(monkeypatch):
+    checked, got = [], []
+    monkeypatch.setattr(talkhere, "whereis", lambda c: True)
+    monkeypatch.setattr(talkhere, "_window_exists", lambda w: checked.append(w) or True)
+    monkeypatch.setattr(talkhere.ClipboardSink, "deliver", lambda self, t: got.append(t))
+    talkhere.deliver_focused(talkhere.ClipboardSink(), "x", "42")
+    assert got == ["x"] and checked == []                        # focus-independent sink
+
+
+def test_P12_target_window_current_mode_restores_old_behaviour(monkeypatch):
+    monkeypatch.setenv("TALKHERE_TARGET_WINDOW", "current")
+    assert talkhere._target_window("42", {}, ns()) is None       # type wherever focus is now
+    monkeypatch.setenv("TALKHERE_TARGET_WINDOW", "start")
+    assert talkhere._target_window("42", {}, ns()) == "42"
 
 
 # ---------------------------------------------------------------------------

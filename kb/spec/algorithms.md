@@ -3,7 +3,7 @@ id: spec-algorithms
 type: spec
 summary: The toggle state machine and the record→transcribe→inject pipeline, including the lock-file protocol.
 domain: core
-last-updated: 2026-07-03
+last-updated: 2026-07-13
 depends-on: [glossary, prd]
 refines: [prd]
 related: [spec-error-taxonomy, properties-functional, arch-overview]
@@ -27,7 +27,9 @@ Two observable states, decided by the presence of the **state file** `recording.
 ```
 
 `recording.json` holds: `{ "pid": <recorder pid>, "wav": "<path>", "started": <epoch>,
-"lang": "<fr|en|auto>" }`. Its **presence is the lock**; its absence means idle.
+"lang": "<fr|en|auto>", "window": "<xdotool id focused at START>" }`. Its **presence is the
+lock**; its absence means idle. `window` is the delivery target (P12): focus will usually have
+moved by STOP, and the transcript must go back where the user began, not follow the cursor.
 
 ## The toggle algorithm (no-arg invocation)
 
@@ -39,9 +41,10 @@ Two observable states, decided by the presence of the **state file** `recording.
      b. wav = runtime/utterance-<started>.wav
      c. spawn recorder detached: pw-record --channels 1 --rate 16000 <wav>
         (fallback: arecord -f S16_LE -r 16000 -c 1 <wav>) — see external/audio-capture
-     d. write recording.json {pid, wav, started, lang}
-     e. cue_start(): play start sound + notify "● recording"
-     f. exit 0    (the recorder keeps running in the background)
+     d. window = xdotool getactivewindow          # the delivery target (P12)
+     e. write recording.json {pid, wav, started, lang, window}
+     f. cue_start(): play start sound + notify "● recording"
+     g. exit 0    (the recorder keeps running in the background)
 3. else                  → STOP:
      a. read recording.json
      b. stop the recorder GRACEFULLY: SIGINT the pid, wait ≤1s for flush, then SIGTERM.
@@ -51,7 +54,9 @@ Two observable states, decided by the presence of the **state file** `recording.
         "nothing captured", delete state, exit 0   (P5: never inject on empty)
      e. text = backend.transcribe(wav, lang)       # local or api — arch/overview
      f. text = postprocess(text)                   # trim, collapse ws, honour trailing-space cfg
-     g. if text non-empty → sink.deliver(text)     # type | paste | clipboard
+     g. if text non-empty → deliver to st.window   # refocus the START window, hold focus
+        (windowactivate --sync + park the pointer inside it for the whole typing burst so
+        focus-follows-mouse cannot steal it); if that window is gone → clipboard, type NOTHING
         else → notify "no speech recognised"
      h. delete recording.json and the wav (unless TALKHERE_KEEP_WAV) 
      i. cue_done(): notify "✓ <first 40 chars>"

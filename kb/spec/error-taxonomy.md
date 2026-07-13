@@ -3,7 +3,7 @@ id: spec-error-taxonomy
 type: spec
 summary: Every failure talkhere can hit, when it occurs, the user-facing signal, and the exit code.
 domain: reliability
-last-updated: 2026-07-03
+last-updated: 2026-07-13
 depends-on: [spec-algorithms, spec-cli-and-config]
 related: [properties-edge-cases]
 ---
@@ -29,6 +29,7 @@ Every error both appends to `~/.talkhere.log` and (when it affects the user) fir
 | E11 | Recorder didn't finalise WAV (killed too hard) | STOP | SIGINT-then-wait avoids it; if header bad, log + notify "recording corrupt" | 0 | T3 |
 | E12 | Accented text mis-injected (`é`→`e`, dropped) | STOP, `type` sink | not silently accepted: `type` sink uses a Unicode-safe path; regression-tested | — | P3 |
 | E13 | Config/prompt file unreadable or malformed TOML | startup | log + notify "bad config, using defaults"; never abort on config | 0 | P11 |
+| E14 | Target window (focused at START) closed or unfocusable | STOP, deliver | **do NOT type** (that would inject into an unintended window); put text on the clipboard + notify "the window you started dictating in is gone — paste it" | 0 | P12 |
 
 ## Fallback ladder (resilience, P10)
 

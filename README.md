@@ -1,8 +1,8 @@
 # talkhere
 
 **Talk-to-type for Linux/X11.** Press a hotkey, speak, press it again — the recognised text
-is typed at the cursor of whatever window has focus: terminal, editor, browser, chat, any
-X11 app. No dictation window, no copy-paste dance. Transcription runs **locally on your GPU**
+is typed at your cursor, in whichever window you started dictating in: terminal, editor,
+browser, chat, any X11 app. No dictation window, no copy-paste dance. Transcription runs **locally on your GPU**
 by default (private, offline, no per-use cost), with CPU and OpenAI-API fallbacks.
 
 It's the spoken-input sibling of [revisor](https://github.com/yurug/revisor): same KISS
@@ -15,8 +15,11 @@ spirit — one script, one job, done well.
 
 ## Features
 
-- **Types anywhere** — injects into the focused window via `xdotool`; works in terminals,
-  Emacs/Vim, browsers, chat apps. Unicode-safe (accents, em-dashes, emoji verified).
+- **Types anywhere** — injects at your cursor via `xdotool`; works in terminals, Emacs/Vim,
+  browsers, chat apps. Unicode-safe (accents, em-dashes, emoji verified).
+- **Lands where you started** — the text goes back to the window you began dictating in, and
+  stays there for the whole injection: wander off or nudge the mouse mid-typing, it won't
+  scatter your sentence across windows.
 - **Single toggle hotkey** — press to start, press to stop. No daemon; zero footprint when idle.
 - **Local by default** — [faster-whisper](https://github.com/SYSTRAN/faster-whisper) on an
   NVIDIA GPU. Your audio never leaves the machine.
@@ -85,6 +88,14 @@ indicator — see [`i3blocks/`](#optional-i3blocks-indicator) below; drop it if 
 Normal use is the toggle: **press the hotkey, speak, press it again.** A cue confirms start;
 the text appears at your cursor a moment after you stop. The cancel key discards a recording.
 
+**Where the text goes.** talkhere remembers the window that was focused when you *started*
+dictating, and delivers the whole transcript there — even if you wandered off to other windows
+while speaking. It also holds the focus for the duration of the typing, so a stray mouse move
+can't scatter your sentence across two windows (window managers like i3 enable
+`focus_follows_mouse` by default). If that window is gone by the time you stop, talkhere types
+**nothing** and puts the text on your clipboard instead. Prefer the old "type wherever I am
+now" behaviour? Set `TALKHERE_TARGET_WINDOW=current`.
+
 For scripting or one-shots there's a CLI (`talkhere --help`):
 
 | Command | What it does |
@@ -123,7 +134,7 @@ paste_key = "ctrl+v"       # per-app paste chord (e.g. ctrl+shift+v in terminals
 
 **Environment variables:** `TALKHERE_BACKEND`, `TALKHERE_SINK`, `TALKHERE_LANG`,
 `TALKHERE_MODEL`, `TALKHERE_DEVICE`, `TALKHERE_COMPUTE`, `TALKHERE_API_MODEL`,
-`TALKHERE_TRAILING_SPACE`, `TALKHERE_KEEP_WAV`.
+`TALKHERE_TRAILING_SPACE`, `TALKHERE_KEEP_WAV`, `TALKHERE_TARGET_WINDOW` (`start`|`current`).
 
 **OpenAI key** (API backend): `OPENAI_API_KEY`, else a GNOME keyring entry — by default
 `service=talkhere key=api-key`, overridable with `TALKHERE_KEYRING_SERVICE` /

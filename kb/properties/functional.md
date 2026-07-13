@@ -1,9 +1,9 @@
 ---
 id: properties-functional
 type: constraint
-summary: Functional invariants P1–P11 talkhere must uphold, each with a violation example, the WHY, and a test strategy.
+summary: Functional invariants P1–P12 talkhere must uphold, each with a violation example, the WHY, and a test strategy.
 domain: correctness
-last-updated: 2026-07-03
+last-updated: 2026-07-13
 depends-on: [spec-algorithms, spec-error-taxonomy]
 related: [properties-edge-cases, properties-non-functional]
 ---
@@ -18,8 +18,10 @@ RECORDING, a no-arg run stops and leaves the state file absent.
 *WHY:* the whole UX is "one key, alternating"; a stuck state breaks every later press.
 *Test:* drive `main()` twice against a fake recorder/backend; assert state file toggles.
 
-### P2 — Injection lands in the focused window
-On STOP, recognised text is delivered via the configured sink to the focused X11 client.
+### P2 — Injection lands in the target window
+On STOP, recognised text is delivered via the configured sink into the **target** X11 client
+— which is the window focused when dictation STARTED (refined by P12), not merely whatever
+happens to be focused at delivery time.
 *Violation:* text printed only to stdout; clipboard set but never pasted in `type` mode.
 *WHY:* "talk-to-type" means it appears where I'm typing, hands-free.
 *Test:* integration test typing into a scratch X client (`xterm`/xdotool getwindowname) in CI-xvfb.
@@ -76,8 +78,28 @@ never aborts if a lower layer can serve.
 A malformed/absent config or prompt file logs a warning and proceeds with defaults.
 *Test:* point config at garbage TOML; assert defaults used, exit 0.
 
+### P12 — The transcript lands in the window where dictation STARTED, entirely
+The window focused at START is remembered and is the sole destination. Focus is restored to
+it before typing and *held* there for the whole injection. If that window is gone or cannot
+be focused, talkhere types **nothing** and preserves the text on the clipboard instead.
+*Violation:* the user starts dictating in the editor, glances at a browser while speaking,
+stops → text is typed into the browser. Or worse: the mouse drifts mid-typing and half the
+sentence lands in another window (XTEST delivers each keystroke to whatever is focused *at
+that instant*, and i3's `focus_follows_mouse` is on by default).
+*WHY:* dictation is only trustworthy if you know where the words will appear. Text sprayed
+across windows is corruption of two buffers at once — strictly worse than no output.
+*How:* store `window` (xdotool id) in `recording.json` at START; at STOP
+`windowactivate --sync` it, verify it really is active, and park the pointer inside it for
+the duration of the typing (restoring the pointer afterwards) so focus-follows-mouse cannot
+steal focus mid-burst. `xdotool type --window` would sidestep focus entirely, but apps ignore
+those synthetic events (verified) — controlling focus is the only reliable route.
+*Escape hatch:* `TALKHERE_TARGET_WINDOW=current` restores the old "type wherever focus is now".
+*Test:* `test_P12_*` — START stores the window; delivery refocuses + guards the pointer; a
+gone target falls back to the clipboard and types nowhere. Verified live A/B: focus and mouse
+parked on a decoy window at STOP, the full transcript still landed only in the start window.
+
 ## Agent notes
-> P3 and P5 are the two that make or break trust. Give them dedicated regression tests
+> P3, P5 and P12 are the three that make or break trust. Give them dedicated regression tests
 > that run on every change, not just once.
 
 ## Related files
