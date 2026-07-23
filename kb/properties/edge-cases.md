@@ -3,7 +3,7 @@ id: properties-edge-cases
 type: constraint
 summary: Boundary conditions T1–T10 with expected behaviour, feeding the test suite.
 domain: correctness
-last-updated: 2026-07-03
+last-updated: 2026-07-23
 related: [properties-functional, spec-error-taxonomy]
 ---
 # Edge cases
@@ -20,6 +20,7 @@ related: [properties-functional, spec-error-taxonomy]
 | T8 | Mixed FR/EN in one utterance under `auto` | Whisper picks dominant language; user can redo with `--lang` (acceptable) |
 | T9 | `~/.talkhere.prompt` present with jargon list | passed as `initial_prompt`; biases spelling; empty/absent → no bias |
 | T10 | CUDA present but OOM / driver mismatch at load | caught, fall back cpu→api, logged (P10/E5) |
+| T11 | GPU shared with another workload: the model loads, then OOMs **during** inference | pre-flight skips cuda under the VRAM floor (E16); if it still fails, the cpu retry runs (E5) and, failing that, the audio is preserved for `--retry-last` (P13/E15) — never a silent loss |
 
 ## Note on T2 (silence hallucination)
 Whisper models can hallucinate text ("Thank you.", "Sous-titres…") on silence. Guard:

@@ -13,7 +13,8 @@ Spec:  kb/spec/algorithms.md (pipeline), kb/spec/cli-and-config.md (flags/config
 Deps:  kb/external/{faster-whisper-blackwell,xdotool-x11-typing,audio-capture-pipewire,
        openai-transcription-api}.md
 Props: P2 inject-to-focus, P3 accent fidelity, P4 language, P5 never-inject-empty,
-       P6 fidelity, P7 sink-degrade, P10 backend-fallback (kb/properties/functional.md)
+       P6 fidelity, P7 sink-degrade, P10 backend-fallback, P12 target window,
+       P13 no silent failure / audio survives (kb/properties/functional.md)
 
 Design decisions (see kb/architecture/):
 - Backends and Sinks are small Protocols with factory resolvers that build a
@@ -35,6 +36,7 @@ import signal
 import subprocess
 import sys
 import time
+import traceback
 import wave
 from pathlib import Path
 from typing import Protocol
@@ -48,10 +50,18 @@ CONFIG_FILE = Path.home() / ".config" / "talkhere" / "config.toml"
 RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "talkhere"
 STATE_FILE = RUNTIME_DIR / "recording.json"   # presence == recording (kb/spec/algorithms.md)
 LOCK_FILE = RUNTIME_DIR / "talkhere.lock"     # flock serialises the toggle decision (P8)
+# Audio whose transcription failed is moved OUT of the runtime dir (which /run wipes on
+# logout) into the home dir, so a lost dictation is always recoverable (P13/E15).
+FAILED_DIR = Path.home() / ".talkhere" / "failed"
 
 MIN_MS = 300                    # utterances shorter than this are "nothing captured" (P5/T1)
 SAMPLE_RATE = 16000             # Whisper wants 16 kHz mono
 DEFAULT_MODEL = "large-v3-turbo"
+FAILED_KEEP = 5                 # keep only the N most recent failed recordings (no growth)
+# Measured peak on an RTX 5060 Ti: large-v3-turbo/float16 holds ~1920 MiB during inference
+# (kb/external/faster-whisper-blackwell.md). Below this much FREE VRAM the model may load
+# and then die mid-transcription, so we pre-empt that and go straight to CPU (E16).
+MIN_FREE_VRAM_MB = 2300
 
 
 # ---------------------------------------------------------------------------
@@ -316,9 +326,42 @@ class LocalBackend:
                         except OSError as e:
                             log(f"local: preload skip {os.path.basename(so)}: {e}")
 
+    @staticmethod
+    def _free_vram_mb() -> int | None:
+        """Free VRAM on GPU 0 in MiB, or None when unknowable (no nvidia-smi, no GPU).
+        Cheap (~50 ms) and read-only — the price of a wasted 5 s model load is far higher."""
+        if not whereis("nvidia-smi"):
+            return None
+        try:
+            r = subprocess.run(["nvidia-smi", "--query-gpu=memory.free",
+                                "--format=csv,noheader,nounits"],
+                               capture_output=True, text=True, timeout=5)
+            return int(r.stdout.strip().splitlines()[0]) if r.returncode == 0 else None
+        except Exception:
+            return None
+
+    def _vram_is_too_tight(self) -> bool:
+        """True if the GPU has too little free memory to transcribe safely (E16).
+        WHY: the GPU is shared (ollama, llama.cpp, games). When free VRAM is just under our
+        footprint the model LOADS and then hits CUDA OOM mid-inference — the failure mode
+        that silently lost dictations on 2026-07-23. Checking first turns that into a slow
+        CPU run (text delivered) instead of a lost one."""
+        try:                                       # a garbage env value must not be fatal (P11)
+            need = int(os.environ.get("TALKHERE_MIN_VRAM_MB", MIN_FREE_VRAM_MB))
+        except ValueError:
+            need = MIN_FREE_VRAM_MB
+        free = self._free_vram_mb()
+        if free is None or free >= need:
+            return False
+        log(f"local: only {free} MiB VRAM free (< {need} needed); using cpu instead (E16)")
+        notify("talkhere", f"GPU busy ({free} MiB free) — transcribing on CPU, slower…")
+        return True
+
     def _load(self):
         """Construct (and cache) the WhisperModel, trying cuda then falling back to cpu (P10)."""
         from faster_whisper import WhisperModel
+        if self.device == "cuda" and self._vram_is_too_tight():
+            self.device, self.compute_type = "cpu", "int8"
         if self.device == "cuda":
             self._preload_cuda_libs()
         try:
@@ -337,7 +380,23 @@ class LocalBackend:
             raise
 
     def transcribe(self, wav_path: str, lang: str) -> str:
-        """Return the transcript ('' = no speech). `lang` 'auto' lets Whisper detect (P4)."""
+        """Return the transcript ('' = no speech). `lang` 'auto' lets Whisper detect (P4).
+
+        @invariant P10 — a cuda failure NEVER loses the utterance: the fallback ladder covers
+        inference, not just model loading. A shared GPU can accept the model and then refuse
+        the inference workspace (CUDA OOM), which used to escape as an unhandled exception."""
+        try:
+            return self._transcribe_once(wav_path, lang)
+        except Exception as e:
+            if self.device != "cuda":                  # already on cpu: nothing left to try
+                raise
+            log(f"local: cuda transcription failed ({e}); retrying on cpu/int8 (P10/E5)")
+            notify("talkhere", "GPU failed — retrying on CPU, slower…")
+            self.device, self.compute_type, self._model = "cpu", "int8", None
+            return self._transcribe_once(wav_path, lang)
+
+    def _transcribe_once(self, wav_path: str, lang: str) -> str:
+        """One transcription attempt on the currently selected device (no fallback)."""
         if self._model is None:
             self._model = self._load()
         t0 = time.monotonic()
@@ -639,6 +698,79 @@ def transcribe_and_deliver(wav: Path, cfg: dict, args, verbose: bool,
     return 0
 
 
+def keep_failed_wav(wav: Path) -> Path | None:
+    """Move `wav` into ~/.talkhere/failed/ and prune to the FAILED_KEEP most recent.
+    Returns the new path (None if the audio was already gone).
+
+    @invariant P13 — audio outlives a failed transcription. The runtime dir lives under
+    /run, which the session wipes; a two-minute dictation must not evaporate because the
+    GPU was busy. Retry it later with `talkhere --retry-last`."""
+    if not wav.exists():
+        return None
+    try:
+        FAILED_DIR.mkdir(parents=True, exist_ok=True)
+        dest = FAILED_DIR / wav.name
+        shutil.move(str(wav), str(dest))               # /run -> $HOME: a copy, not a rename
+        keep = sorted(FAILED_DIR.glob("*.wav"), key=lambda p: p.stat().st_mtime)[:-FAILED_KEEP]
+        for old in keep:                               # bounded: never a silent disk hog
+            old.unlink(missing_ok=True)
+        log(f"audio preserved at {dest} (retry with: talkhere --retry-last)")
+        return dest
+    except Exception as e:                             # preserving is best-effort, never fatal
+        log(f"could not preserve {wav}: {e}")
+        return None
+
+
+def transcribe_or_keep(wav: Path, cfg: dict, args, verbose: bool,
+                       lang: str | None = None, target_wid: str | None = None) -> int:
+    """`transcribe_and_deliver` with a safety net: on ANY failure the audio is preserved and
+    the user is told, instead of a traceback vanishing into a hotkey's absent terminal
+    (P13/E15). On success the wav is removed unless TALKHERE_KEEP_WAV."""
+    try:
+        rc = transcribe_and_deliver(wav, cfg, args, verbose, lang=lang, target_wid=target_wid)
+    except Exception as e:
+        log(f"transcription failed: {type(e).__name__}: {e}\n{traceback.format_exc().rstrip()}")
+        kept = keep_failed_wav(wav)
+        notify("talkhere: transcription failed",
+               "audio kept — run: talkhere --retry-last" if kept else f"{type(e).__name__}: {e}")
+        return 1
+    if rc != 0:                                        # delivery/backend gave up: keep the audio
+        keep_failed_wav(wav)
+    elif os.environ.get("TALKHERE_KEEP_WAV", "0") == "0":
+        wav.unlink(missing_ok=True)
+    return rc
+
+
+def latest_failed_wav() -> Path | None:
+    """The most recent preserved recording, or None."""
+    if not FAILED_DIR.exists():
+        return None
+    wavs = sorted(FAILED_DIR.glob("*.wav"), key=lambda p: p.stat().st_mtime)
+    return wavs[-1] if wavs else None
+
+
+def cmd_transcribe_file(wav: Path, cfg: dict, args, verbose: bool, drop_on_success: bool) -> int:
+    """`--file WAV` / `--retry-last`: transcribe an existing recording and deliver it.
+
+    The target window is the one focused NOW (P12 remembers the START window, but here the
+    user is explicitly asking at this moment, so "here" is what they mean). `drop_on_success`
+    removes a preserved wav once its text has landed, so --retry-last doesn't replay it."""
+    if not wav.exists():
+        notify("talkhere", "no recording to retry"); log(f"retry: {wav} not found")
+        return 1
+    log(f"RETRY {wav}")
+    target = _target_window(_active_window(), cfg, args)
+    try:
+        rc = transcribe_and_deliver(wav, cfg, args, verbose, target_wid=target)
+    except Exception as e:                             # keep the audio: the retry can be retried
+        log(f"retry failed: {type(e).__name__}: {e}\n{traceback.format_exc().rstrip()}")
+        notify("talkhere: transcription failed", f"{type(e).__name__} — audio kept at {wav}")
+        return 1
+    if rc == 0 and drop_on_success:
+        wav.unlink(missing_ok=True)
+    return rc
+
+
 def cmd_once(seconds: float, cfg: dict, args, verbose: bool) -> int:
     """`--once N`: record N seconds, then transcribe+deliver. The Step-1 vertical slice —
     no toggle/state, just proves record -> STT -> sink end to end."""
@@ -657,11 +789,8 @@ def cmd_once(seconds: float, cfg: dict, args, verbose: bool) -> int:
         time.sleep(seconds)
     finally:
         stop_recorder(proc)
-    rc = transcribe_and_deliver(wav, cfg, args, verbose,
-                                target_wid=_target_window(window, cfg, args))
-    if os.environ.get("TALKHERE_KEEP_WAV", "0") == "0":
-        wav.unlink(missing_ok=True)
-    return rc
+    return transcribe_or_keep(wav, cfg, args, verbose,
+                              target_wid=_target_window(window, cfg, args))
 
 
 # ---------------------------------------------------------------------------
@@ -746,11 +875,8 @@ def _stop(st: dict, cfg: dict, args, verbose: bool) -> int:
     wav = Path(st["wav"])
     stop_recorder_pid(int(st["pid"]))
     log(f"STOP recorder pid={st['pid']} wav={wav}")
-    rc = transcribe_and_deliver(wav, cfg, args, verbose, lang=st.get("lang"),
-                                target_wid=_target_window(st.get("window"), cfg, args))
-    if os.environ.get("TALKHERE_KEEP_WAV", "0") == "0":
-        wav.unlink(missing_ok=True)
-    return rc
+    return transcribe_or_keep(wav, cfg, args, verbose, lang=st.get("lang"),
+                              target_wid=_target_window(st.get("window"), cfg, args))
 
 
 def cmd_toggle(cfg: dict, args, verbose: bool) -> int:
@@ -793,6 +919,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="abort an in-progress recording; inject nothing")
     p.add_argument("--status", action="store_true",
                    help="print idle|recording; exit 0 if idle else 1 (for i3blocks)")
+    p.add_argument("--retry-last", action="store_true",
+                   help="re-transcribe the last recording whose transcription failed (P13)")
+    p.add_argument("--file", metavar="WAV",
+                   help="transcribe an existing WAV and deliver it (no recording)")
     p.add_argument("--lang", choices=["auto", "fr", "en"], help="force language for this run (P4)")
     p.add_argument("--backend", choices=["local", "api"], help="override STT backend")
     p.add_argument("--sink", choices=["type", "paste", "clipboard"], help="override delivery")
@@ -801,6 +931,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point with the mandatory safety net (kb/conventions/code-and-testing.md):
+    talkhere runs from a hotkey with no terminal, so an unhandled exception would be an
+    invisible death — no log line, no notification, and (before P13) a lost recording.
+    Everything that escapes `_dispatch` is logged with its traceback and notified (E15)."""
+    try:
+        return _dispatch(argv)
+    except SystemExit:                                 # argparse --help/usage: not an error
+        raise
+    except KeyboardInterrupt:
+        log("interrupted (SIGINT)")
+        return 130
+    except Exception as e:
+        log(f"FATAL {type(e).__name__}: {e}\n{traceback.format_exc().rstrip()}")
+        notify("talkhere: unexpected error", f"{type(e).__name__}: {e}"[:150])
+        return 1
+
+
+def _dispatch(argv: list[str] | None) -> int:
+    """Parse the flags and run the selected command. Raises freely — main() is the net."""
     args = build_parser().parse_args(argv)
     cfg = load_config()
 
@@ -812,6 +961,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cancel:
         return cmd_cancel()
+
+    if args.retry_last or args.file:                   # recover a failed transcription (P13)
+        wav = Path(args.file) if args.file else latest_failed_wav()
+        if wav is None:
+            notify("talkhere", "no failed recording to retry")
+            log("retry-last: nothing preserved")
+            return 0
+        return cmd_transcribe_file(wav, cfg, args, args.verbose,
+                                   drop_on_success=not args.file)
 
     if args.once is not None:
         return cmd_once(args.once, cfg, args, args.verbose)
@@ -829,8 +987,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except KeyboardInterrupt:
-        log("interrupted (SIGINT)")
-        sys.exit(130)
+    sys.exit(main())                                   # main() already nets every exception

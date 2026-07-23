@@ -3,7 +3,7 @@ id: kb-index
 type: index
 summary: Root routing table for the talkhere knowledge base — start here.
 domain: meta
-last-updated: 2026-07-08
+last-updated: 2026-07-23
 ---
 # talkhere — Knowledge Base
 
@@ -31,7 +31,7 @@ reading bundle.
 - `GLOSSARY.md` — canonical terms.
 - `domain/prd.md` — product requirements, user stories, out-of-scope.
 - `spec/INDEX.md` → `spec/algorithms.md` (toggle state machine), `spec/cli-and-config.md`, `spec/error-taxonomy.md`.
-- `properties/INDEX.md` → `properties/functional.md` (P1–P11), `properties/non-functional.md` (NF1–NF6), `properties/edge-cases.md` (T1–T10).
+- `properties/INDEX.md` → `properties/functional.md` (P1–P13), `properties/non-functional.md` (NF1–NF6), `properties/edge-cases.md` (T1–T11).
 - `architecture/overview.md` + `architecture/decisions/INDEX.md` (3 ADRs: STT / trigger / delivery).
 - `external/INDEX.md` → faster-whisper-blackwell, xdotool-x11-typing, audio-capture-pipewire, openai-transcription-api.
 - `conventions/code-and-testing.md`, `runbooks/audit-checklist.md`, `indexes/by-task.md`.

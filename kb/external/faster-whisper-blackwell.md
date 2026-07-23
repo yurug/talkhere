@@ -3,7 +3,7 @@ id: external-faster-whisper-blackwell
 type: external
 summary: Verified runtime of faster-whisper/CTranslate2 on the RTX 5060 Ti (Blackwell sm_120) — exact versions, the float16-not-int8 gotcha, the cuBLAS+cuDNN pip+LD_LIBRARY_PATH recipe, measured latency, model choice, CPU fallback.
 domain: external-dependency
-last-updated: 2026-07-08
+last-updated: 2026-07-23
 related: [arch-0001, properties-non-functional]
 ---
 # faster-whisper on Blackwell (RTX 5060 Ti, sm_120)
@@ -18,6 +18,20 @@ Verified stack: driver **580.105.08** (CUDA 13.0-capable), **ctranslate2 4.8.1**
 - ⇒ per-invocation stop→text ≈ **load 2.2 s + transcribe ~1.3 s (for a 5 s clip) ≈ 3.5 s**;
   warm (model resident) ≈ **1.3 s** (beats NF1 ≤2 s). This is the Q5 datum: per-invocation
   is usable, a `--serve` warm helper is snappy. v1 default = per-invocation (no daemon).
+
+### Measured VRAM footprint — and why the GPU being *shared* matters (2026-07-23)
+`large-v3-turbo` / float16 holds **~1920 MiB** during inference (`nvidia-smi
+--query-compute-apps`), of which roughly 1.6 GB is the loaded model and the rest is the
+inference workspace. The consequence on a workstation whose GPU also runs ollama /
+llama.cpp / games: with free VRAM *between* those two numbers, `WhisperModel(...)`
+**succeeds** and the transcription then dies with `CUDA failed with error out of memory`.
+The log signature is a `loaded … in N s` line with no `transcribed` line after it.
+
+CTranslate2 surfaces this as a plain exception from `model.transcribe(...)`, so it must be
+caught around the *inference*, not only around the load (talkhere: E5/E16 — pre-flight
+`nvidia-smi --query-gpu=memory.free` against `TALKHERE_MIN_VRAM_MB`, default 2300 MiB, then
+retry on cpu). CPU/int8 for the same model runs ≈1.2× real time (115 s for a 98 s
+utterance) — slow, but it returns text.
 
 ## Why faster-whisper over openai-whisper / whisper.cpp here
 - `faster-whisper` = CTranslate2 reimplementation of Whisper: 4× faster, lower VRAM,

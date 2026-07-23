@@ -1,9 +1,9 @@
 ---
 id: properties-functional
 type: constraint
-summary: Functional invariants P1–P12 talkhere must uphold, each with a violation example, the WHY, and a test strategy.
+summary: Functional invariants P1–P13 talkhere must uphold, each with a violation example, the WHY, and a test strategy.
 domain: correctness
-last-updated: 2026-07-13
+last-updated: 2026-07-23
 depends-on: [spec-algorithms, spec-error-taxonomy]
 related: [properties-edge-cases, properties-non-functional]
 ---
@@ -98,9 +98,29 @@ those synthetic events (verified) — controlling focus is the only reliable rou
 gone target falls back to the clipboard and types nowhere. Verified live A/B: focus and mouse
 parked on a decoy window at STOP, the full transcript still landed only in the start window.
 
+### P13 — No failure is silent, and the audio outlives it
+Every failure path logs (with traceback) and notifies; nothing exits quietly. If a
+transcription fails for any reason, the recording is **moved to `~/.talkhere/failed/`**
+(most recent `FAILED_KEEP` kept) and the user is told to run `talkhere --retry-last`.
+*Violation:* observed 2026-07-23 — three dictations died between "model loaded" and
+"transcribed": no log line, no notification, the wav left in `/run` (wiped at logout). The
+user discovered the loss by noticing nothing had been typed.
+*WHY:* talkhere is launched from a hotkey, so stderr goes nowhere. An unhandled exception is
+therefore not "an error the user can see" but a **silent data loss** — a two-minute dictation
+is unrecoverable thought, not a retryable command. Loud failure + kept audio makes the worst
+case "try again later", never "gone".
+*How:* `main()` wraps `_dispatch()` in a catch-all (log FATAL + traceback, notify, exit 1);
+`transcribe_or_keep()` preserves the wav on exception **or** non-zero exit code;
+`--retry-last` / `--file WAV` re-run the pipeline on a preserved recording, delivering to the
+window focused at that moment.
+*Test:* `test_P13_*` — a raising `transcribe_and_deliver` yields exit 1, a notification naming
+the retry, and the wav in `FAILED_DIR`; `--retry-last` delivers the newest preserved wav and
+consumes it; the directory stays bounded.
+
 ## Agent notes
-> P3, P5 and P12 are the three that make or break trust. Give them dedicated regression tests
-> that run on every change, not just once.
+> P3, P5, P12 and P13 are the four that make or break trust. Give them dedicated regression
+> tests that run on every change, not just once. P13 is the meta-property: a violation of any
+> other invariant must at least be *visible*.
 
 ## Related files
 - `properties/edge-cases.md` — the boundary inputs (T-entries) that stress P5/P8.

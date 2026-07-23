@@ -3,7 +3,7 @@ id: index-by-task
 type: index
 summary: "Given my task, what do I load?" — ordered reading bundles for implement / debug / test / extend.
 domain: meta
-last-updated: 2026-07-08
+last-updated: 2026-07-23
 ---
 # By-task routing table
 
@@ -18,7 +18,9 @@ last-updated: 2026-07-08
 **Key questions this answers:** what am I building, what must hold, how does the dep behave.
 
 ## Debug (something misbehaves)
-1. `spec/error-taxonomy.md` — match the symptom to E1–E13 and its intended handling.
+1. `spec/error-taxonomy.md` — match the symptom to E1–E16 and its intended handling.
+   *Nothing happened at all — no text, no notification?* That is E15/P13: check
+   `~/.talkhere.log` for a `FATAL` line, and `~/.talkhere/failed/` for the kept audio.
 2. `properties/edge-cases.md` — is this a known T-entry?
 3. Relevant `external/` file — a dependency gotcha (float16, WAV header, xdotool accents).
 4. `~/.talkhere.log` — the runtime trace (NF6).

@@ -3,7 +3,7 @@ id: spec-algorithms
 type: spec
 summary: The toggle state machine and the record→transcribe→inject pipeline, including the lock-file protocol.
 domain: core
-last-updated: 2026-07-13
+last-updated: 2026-07-23
 depends-on: [glossary, prd]
 refines: [prd]
 related: [spec-error-taxonomy, properties-functional, arch-overview]
@@ -58,7 +58,9 @@ moved by STOP, and the transcript must go back where the user began, not follow 
         (windowactivate --sync + park the pointer inside it for the whole typing burst so
         focus-follows-mouse cannot steal it); if that window is gone → clipboard, type NOTHING
         else → notify "no speech recognised"
-     h. delete recording.json and the wav (unless TALKHERE_KEEP_WAV) 
+     h. delete recording.json and the wav (unless TALKHERE_KEEP_WAV) — but ONLY after the
+        text has actually been delivered: on any failure the wav is moved to
+        ~/.talkhere/failed/ for `--retry-last` (P13/E15), never deleted
      i. cue_done(): notify "✓ <first 40 chars>"
      j. exit 0
 4. release_lock()  (always, via finally)

@@ -27,6 +27,8 @@ spirit — one script, one job, done well.
 - **Bilingual** — auto-detects language, or force it (`--lang fr`). Optional vocabulary file
   biases spelling of names/jargon.
 - **Fails safe** — silence or an accidental double-tap types nothing; every error notifies you.
+- **Never loses a dictation** — if transcription fails (busy GPU, a bug), the audio is kept
+  and one command replays it: `talkhere --retry-last`.
 
 ## Requirements
 
@@ -107,6 +109,8 @@ For scripting or one-shots there's a CLI (`talkhere --help`):
 | `talkhere --lang fr` | force French (or `en`) for this utterance |
 | `talkhere --backend api` | use the OpenAI API instead of the local GPU |
 | `talkhere --sink clipboard` | put the text on the clipboard instead of typing it |
+| `talkhere --retry-last` | re-transcribe the last recording whose transcription failed |
+| `talkhere --file rec.wav` | transcribe an existing WAV and deliver it |
 | `talkhere --status` | print `idle`/`recording` (exit 0/1) — for status bars |
 | `talkhere -v ...` | also echo the transcript to stdout |
 
@@ -134,7 +138,8 @@ paste_key = "ctrl+v"       # per-app paste chord (e.g. ctrl+shift+v in terminals
 
 **Environment variables:** `TALKHERE_BACKEND`, `TALKHERE_SINK`, `TALKHERE_LANG`,
 `TALKHERE_MODEL`, `TALKHERE_DEVICE`, `TALKHERE_COMPUTE`, `TALKHERE_API_MODEL`,
-`TALKHERE_TRAILING_SPACE`, `TALKHERE_KEEP_WAV`, `TALKHERE_TARGET_WINDOW` (`start`|`current`).
+`TALKHERE_TRAILING_SPACE`, `TALKHERE_KEEP_WAV`, `TALKHERE_TARGET_WINDOW` (`start`|`current`),
+`TALKHERE_MIN_VRAM_MB` (free-VRAM floor below which the GPU is skipped for the CPU, 2300).
 
 **OpenAI key** (API backend): `OPENAI_API_KEY`, else a GNOME keyring entry — by default
 `service=talkhere key=api-key`, overridable with `TALKHERE_KEYRING_SERVICE` /
@@ -180,6 +185,13 @@ i3blocks` in the bindings above.
 - **`libcublas.so.12 not found` / `libcudnn…`** → install the GPU wheels
   (`pip install -r requirements.txt`), or use `--backend api` / `TALKHERE_DEVICE=cpu`.
 - **`cuBLAS … NOT_SUPPORTED` on a 50-series GPU** → keep `compute_type=float16` (the default).
+- **Nothing happened at all — no text, no error** → look for a `FATAL` line in
+  `~/.talkhere.log`; the recording is preserved in `~/.talkhere/failed/`, so
+  `talkhere --retry-last` gets your words back.
+- **"GPU busy — transcribing on CPU"** → something else (ollama, llama.cpp, a game) is
+  holding your VRAM. talkhere needs ~1.9 GB free and falls back to CPU below
+  `TALKHERE_MIN_VRAM_MB` (2300 MiB) rather than dying mid-transcription. Free the GPU for
+  full speed, or lower the floor if you know it fits.
 - **Nothing captured / no speech** → check your default source (`pactl list sources short`,
   `arecord -l`) and that the mic isn't muted.
 - **Accents look wrong in one app** → try `--sink paste` (sets the clipboard then sends a

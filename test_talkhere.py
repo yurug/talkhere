@@ -46,16 +46,19 @@ def make_wav(path, ms):
 
 def ns(**kw):
     """An argparse-like namespace with all CLI attrs defaulted to None/False."""
-    base = dict(once=None, status=False, lang=None, backend=None, sink=None, verbose=False)
+    base = dict(once=None, status=False, lang=None, backend=None, sink=None, verbose=False,
+                stop=False, cancel=False, retry_last=False, file=None)
     base.update(kw)
     return types.SimpleNamespace(**base)
 
 
 @pytest.fixture(autouse=True)
-def _mute_feedback(monkeypatch):
-    """Feedback (notify/sound) is best-effort UI; silence it so tests stay hermetic."""
+def _mute_feedback(monkeypatch, tmp_path):
+    """Feedback (notify/sound) is best-effort UI; silence it so tests stay hermetic. The log
+    is redirected too — a test run must never write into the user's real ~/.talkhere.log."""
     monkeypatch.setattr(talkhere, "notify", lambda *a, **k: None)
     monkeypatch.setattr(talkhere, "cue", lambda *a, **k: None)
+    monkeypatch.setattr(talkhere, "LOG_FILE", tmp_path / "talkhere.log")
 
 
 # ---------------------------------------------------------------------------
@@ -390,11 +393,132 @@ def test_P10_cuda_failure_falls_back_to_cpu(monkeypatch):
 
     monkeypatch.setattr(fw, "WhisperModel", fake_model)
     monkeypatch.setattr(talkhere.LocalBackend, "_preload_cuda_libs", staticmethod(lambda: None))
-    monkeypatch.setattr(talkhere, "log", lambda *a: None)
+    monkeypatch.setattr(talkhere.LocalBackend, "_free_vram_mb", staticmethod(lambda: 99999))
+    monkeypatch.setattr(talkhere, "log", lambda *a: None)      # ample VRAM: exercise the LOAD path
     be = talkhere.LocalBackend("m", "cuda", "float16")
     be._load()
     assert be.device == "cpu"                                   # cascaded to cpu (P10/E5)
     assert calls == [("cuda", "float16"), ("cpu", "int8")]
+
+
+def test_P10_cuda_inference_failure_falls_back_to_cpu(monkeypatch):
+    """The 2026-07-23 regression: a shared GPU accepts the model, then OOMs during the
+    transcription. That must downshift to cpu, not escape as an exception."""
+    fw = pytest.importorskip("faster_whisper")
+    devices = []
+
+    class FakeModel:
+        def __init__(self, device):
+            self.device = device
+
+        def transcribe(self, *a, **kw):
+            if self.device == "cuda":
+                raise RuntimeError("CUDA failed with error out of memory")
+            return ([types.SimpleNamespace(text="bonjour")],
+                    types.SimpleNamespace(language="fr"))
+
+    monkeypatch.setattr(fw, "WhisperModel",
+                        lambda name, device, compute_type: devices.append(device) or
+                        FakeModel(device))
+    monkeypatch.setattr(talkhere.LocalBackend, "_preload_cuda_libs", staticmethod(lambda: None))
+    monkeypatch.setattr(talkhere.LocalBackend, "_free_vram_mb", staticmethod(lambda: 99999))
+    monkeypatch.setattr(talkhere, "log", lambda *a: None)
+    be = talkhere.LocalBackend("m", "cuda", "float16")
+    assert be.transcribe("x.wav", "auto") == "bonjour"           # text delivered, not lost
+    assert devices == ["cuda", "cpu"] and be.device == "cpu"     # downshifted (P10/E5)
+
+
+def test_E16_tight_vram_skips_cuda_entirely(monkeypatch):
+    """Below the VRAM floor we don't even try cuda: loading would succeed and inference
+    would then die — the failure mode that lost dictations."""
+    fw = pytest.importorskip("faster_whisper")
+    devices = []
+    monkeypatch.setattr(fw, "WhisperModel",
+                        lambda name, device, compute_type: devices.append(device) or object())
+    monkeypatch.setattr(talkhere.LocalBackend, "_free_vram_mb", staticmethod(lambda: 800))
+    monkeypatch.setattr(talkhere, "log", lambda *a: None)
+    be = talkhere.LocalBackend("m", "cuda", "float16")
+    be._load()
+    assert devices == ["cpu"] and be.compute_type == "int8"      # never touched cuda (E16)
+
+
+def test_E16_ample_vram_uses_cuda(monkeypatch):
+    fw = pytest.importorskip("faster_whisper")
+    devices = []
+    monkeypatch.setattr(fw, "WhisperModel",
+                        lambda name, device, compute_type: devices.append(device) or object())
+    monkeypatch.setattr(talkhere.LocalBackend, "_preload_cuda_libs", staticmethod(lambda: None))
+    monkeypatch.setattr(talkhere.LocalBackend, "_free_vram_mb", staticmethod(lambda: 8000))
+    monkeypatch.setattr(talkhere, "log", lambda *a: None)
+    talkhere.LocalBackend("m", "cuda", "float16")._load()
+    assert devices == ["cuda"]
+
+
+# ---------------------------------------------------------------------------
+# P13 — no failure is silent, and the audio outlives it
+# ---------------------------------------------------------------------------
+def _failed_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr(talkhere, "FAILED_DIR", tmp_path / "failed")
+    return tmp_path / "failed"
+
+
+def test_P13_failed_transcription_preserves_the_audio(monkeypatch, tmp_path):
+    failed = _failed_dir(monkeypatch, tmp_path)
+    notes = []
+    monkeypatch.setattr(talkhere, "notify", lambda *a, **k: notes.append(a))
+    monkeypatch.setattr(talkhere, "transcribe_and_deliver",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("cuda OOM")))
+    wav = tmp_path / "utterance-1.wav"
+    make_wav(wav, 2000)
+    rc = talkhere.transcribe_or_keep(wav, {}, ns(), verbose=False)
+    assert rc == 1                                              # loud failure, not exit 0
+    assert not wav.exists() and (failed / "utterance-1.wav").exists()   # audio survives (P13)
+    assert notes and "retry" in notes[0][1]                     # tells the user how to recover
+
+
+def test_P13_unhandled_exception_is_logged_and_notified(monkeypatch):
+    """A crash anywhere must not be a silent death: hotkey launches have no terminal."""
+    logs, notes = [], []
+    monkeypatch.setattr(talkhere, "log", lambda m: logs.append(m))
+    monkeypatch.setattr(talkhere, "notify", lambda *a, **k: notes.append(a))
+    monkeypatch.setattr(talkhere, "_dispatch",
+                        lambda argv: (_ for _ in ()).throw(ValueError("boom")))
+    assert talkhere.main([]) == 1                               # non-zero exit (E15)
+    assert any("FATAL" in m and "boom" in m for m in logs)      # traceback in the log
+    assert any("boom" in n[1] for n in notes)                   # and a desktop notification
+
+
+def test_P13_retry_last_delivers_the_preserved_audio(monkeypatch, tmp_path):
+    failed = _failed_dir(monkeypatch, tmp_path)
+    failed.mkdir(parents=True)
+    make_wav(failed / "utterance-1.wav", 2000)
+    make_wav(failed / "utterance-2.wav", 2000)                  # the newest one wins
+    sink = FakeSink()
+    monkeypatch.setattr(talkhere, "resolve_backend", lambda cfg, args: FakeBackend("rattrapé"))
+    monkeypatch.setattr(talkhere, "resolve_sink", lambda cfg, args: (sink, "type"))
+    monkeypatch.setattr(talkhere, "_active_window", lambda: None)
+    assert talkhere.main(["--retry-last"]) == 0
+    assert sink.delivered == ["rattrapé "]                      # text recovered and delivered
+    assert not (failed / "utterance-2.wav").exists()            # consumed, won't replay
+    assert (failed / "utterance-1.wav").exists()                # older one untouched
+
+
+def test_P13_retry_last_with_nothing_preserved_is_a_no_op(monkeypatch, tmp_path):
+    _failed_dir(monkeypatch, tmp_path)
+    assert talkhere.main(["--retry-last"]) == 0                 # a no-op, not an error
+
+
+def test_P13_failed_dir_keeps_only_the_last_five(monkeypatch, tmp_path):
+    failed = _failed_dir(monkeypatch, tmp_path)
+    import os as _os
+    for i in range(8):
+        wav = tmp_path / f"u{i}.wav"
+        make_wav(wav, 400)
+        talkhere.keep_failed_wav(wav)
+        _os.utime(failed / f"u{i}.wav", (1000 + i, 1000 + i))   # deterministic ordering
+    kept = sorted(p.name for p in failed.glob("*.wav"))
+    assert len(kept) == talkhere.FAILED_KEEP                    # bounded, no disk hog
+    assert "u7.wav" in kept and "u0.wav" not in kept            # newest survive
 
 
 def test_E6_int8_forced_to_float16_on_cuda(monkeypatch):

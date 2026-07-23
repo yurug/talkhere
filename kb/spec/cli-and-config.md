@@ -3,7 +3,7 @@ id: spec-cli-and-config
 type: spec
 summary: The full CLI contract (flags, exit codes) and the config/env/file surface for talkhere.
 domain: interface
-last-updated: 2026-07-13
+last-updated: 2026-07-23
 depends-on: [prd, spec-algorithms]
 related: [spec-error-taxonomy]
 ---
@@ -23,6 +23,8 @@ related: [spec-error-taxonomy]
 | `--sink type\|paste\|clipboard` | pick delivery for this run | overrides config default |
 | `--status` | print `recording`/`idle`, exit 0 if idle else 1 | for i3blocks/scripts |
 | `--once` | record a fixed N seconds then transcribe (no toggle) | scripting/testing convenience |
+| `--retry-last` | re-transcribe the newest recording preserved after a failure | P13; consumed on success |
+| `--file WAV` | transcribe an existing WAV and deliver it | never deletes the file |
 | `-v/--verbose` | also echo the transcript to stdout | debugging, piping |
 | `-h/--help` | usage | |
 
@@ -55,6 +57,7 @@ related: [spec-error-taxonomy]
 | `TALKHERE_TARGET_WINDOW` | `start` | `start` = deliver into the window focused when recording began (P12); `current` = old behaviour (wherever focus is at STOP) |
 | `TALKHERE_TRAILING_SPACE` | `1` | append one space after injected text |
 | `TALKHERE_KEEP_WAV` | `0` | keep the utterance wav for debugging |
+| `TALKHERE_MIN_VRAM_MB` | `2300` | free-VRAM floor below which cuda is skipped for cpu (E16); measured footprint is ~1920 MiB |
 
 ### Config file (all keys optional; TOML)
 
@@ -84,6 +87,7 @@ paste_key = "ctrl+v"        # per-app override, e.g. ctrl+shift+v for terminals
 | `~/.talkhere.log` | timestamped append log (mirrors revisor) | grows; user-managed |
 | `${XDG_RUNTIME_DIR:-/tmp}/talkhere/recording.json` | state/lock (idle=absent); holds pid, wav, lang, **window** (delivery target, P12) | per utterance |
 | `${XDG_RUNTIME_DIR:-/tmp}/talkhere/utterance-*.wav` | in-progress audio | deleted after inject |
+| `~/.talkhere/failed/utterance-*.wav` | audio whose transcription failed, kept for `--retry-last` (P13) | last 5; consumed on a successful retry |
 
 ## Agent notes
 > `--status`'s inverted exit code (0=idle) is deliberate so `talkhere --status && echo idle`
