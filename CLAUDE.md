@@ -9,7 +9,7 @@ same KISS philosophy — one script, do one thing right, clear semantics, minima
 ## How to work on this project
 
 This project is built with the **Agentic Dev Kit** spec-driven method
-(`~/work/dev/agentic-dev-kit`). The knowledge base is the source of truth.
+(`~/work/dev/socrask-private`). The knowledge base is the source of truth.
 
 - **Start here:** `kb/INDEX.md` → routing tables in `kb/indexes/by-task.md`.
 - **Before implementing:** read the relevant `kb/spec/`, `kb/properties/`, and any
